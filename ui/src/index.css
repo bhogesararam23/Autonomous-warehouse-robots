@@ -1,0 +1,218 @@
+:root {
+  --bg-color: #0f172a;
+  --panel-bg: rgba(30, 41, 59, 0.7);
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  
+  /* Grid Colors */
+  --cell-bg: rgba(51, 65, 85, 0.3);
+  --cell-border: rgba(148, 163, 184, 0.1);
+  --shelf: #475569;
+  --path: rgba(59, 130, 246, 0.2);
+  --path-past: rgba(59, 130, 246, 0.5);
+  --start: #10b981;
+  --goal: #ef4444;
+  --robot: #3b82f6;
+  --moving-obs: #f59e0b;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  width: 100%;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  font-weight: 800;
+  background: linear-gradient(to right, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  margin-top: 0.5rem;
+}
+
+.main-content {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 2rem;
+  align-items: start;
+}
+
+/* Grid System */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-w), 1fr);
+  grid-template-rows: repeat(var(--grid-h), 1fr);
+  gap: 2px;
+  background: var(--cell-border);
+  border: 2px solid var(--cell-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  aspect-ratio: var(--grid-w) / var(--grid-h);
+}
+
+.cell {
+  background-color: var(--cell-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(10px, 1.2vw, 16px);
+  font-weight: bold;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.cell.shelf {
+  background-color: var(--shelf);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+}
+
+.cell.path {
+  background-color: var(--path);
+  position: relative;
+}
+.cell.path::after {
+  content: '';
+  position: absolute;
+  width: 30%;
+  height: 30%;
+  background: var(--accent);
+  border-radius: 50%;
+  opacity: 0.3;
+}
+
+.cell.past-path {
+  background-color: var(--path-past);
+}
+
+.cell.start { background-color: var(--start); color: #fff; }
+.cell.goal { background-color: var(--goal); color: #fff; }
+.cell.robot {
+  background-color: var(--robot);
+  border-radius: 4px;
+  transform: scale(1.1);
+  z-index: 10;
+  box-shadow: 0 0 15px var(--robot);
+  animation: pulse 1s infinite alternate;
+}
+.cell.moving-obstacle {
+  background-color: var(--moving-obs);
+  box-shadow: 0 0 10px var(--moving-obs);
+}
+
+@keyframes pulse {
+  from { transform: scale(1.05); }
+  to { transform: scale(1.15); box-shadow: 0 0 20px var(--robot); }
+}
+
+/* Sidebar Panel */
+.panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.controls {
+  display: flex;
+  gap: 1rem;
+}
+
+button {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: white;
+}
+
+.play-btn { background: var(--accent); }
+.play-btn:hover { background: var(--accent-hover); }
+.play-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.reset-btn { background: #475569; }
+.reset-btn:hover { background: #334155; }
+
+.stats h2, .legend h2 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  color: #cbd5e1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.5rem;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.stat-row strong {
+  color: var(--text-primary);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.legend-item .cell {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.error {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .main-content {
+    grid-template-columns: 1fr;
+  }
+}
