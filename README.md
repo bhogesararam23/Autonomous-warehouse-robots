@@ -58,7 +58,21 @@ planner checks two things so it doesnt crash:
 ### path finding
 * uses manhattan distance for heuristic since diagonals arent allowed: `abs(x1 - x2) + abs(y1 - y2)`
 * uses pythons `heapq` module as priority queue so it expands lowest cost nodes first
-* once it hits the goal it backtracks using `came_from` and reverses it to get the final path
+* once it hits the goal it checks **terminal safety** for a full joint cycle (LCM of all moving obstacle route lengths). The robot only arrives at the goal if it can wait indefinitely without being hit by periodic obstacles.
+* if safe, it backtracks using `came_from` and reverses it to get the final path
+
+## tests
+
+```bash
+# run the terminal python simulation
+python warehouse_astar_sim.py
+
+# run python path validator and unittests
+python -m unittest test_warehouse.py
+
+# run typescript unittests (inside ui/)
+npm run test:ts
+```
 
 ## terminal map symbols
 

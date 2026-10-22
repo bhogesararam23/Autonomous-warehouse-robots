@@ -117,6 +117,33 @@ def moving_obstacle_positions(
     return positions
 
 
+import math
+from functools import reduce
+
+def get_joint_period(moving_obstacles: list[MovingObstacle]) -> int:
+    """Calculate the joint period (LCM) of all moving obstacle routes."""
+    if not moving_obstacles:
+        return 1
+    return reduce(math.lcm, (len(obs.route) for obs in moving_obstacles))
+
+
+def is_safe_after_arrival(
+    point: Point,
+    arrival_time: int,
+    moving_obstacles: list[MovingObstacle],
+    joint_period: int,
+) -> bool:
+    """Check if the goal cell remains collision-free for a full joint period."""
+    if not moving_obstacles:
+        return True
+
+    for t in range(arrival_time, arrival_time + joint_period):
+        for obstacle in moving_obstacles:
+            if point == obstacle.position_at(t):
+                return False
+    return True
+
+
 def has_dynamic_collision(
     current: Point,
     next_point: Point,
@@ -169,6 +196,8 @@ def astar(
     tie_breaker = 0
     expanded_nodes = 0
 
+    joint_period = get_joint_period(moving_obstacles)
+
     while open_set:
         _, _, _, current_state = heapq.heappop(open_set)
 
@@ -180,7 +209,13 @@ def astar(
 
         current, current_time = current_state
         if current == goal:
-            return rebuild_path(came_from, current_state), expanded_nodes
+            if is_safe_after_arrival(current, current_time, moving_obstacles, joint_period):
+                return rebuild_path(came_from, current_state), expanded_nodes
+            else:
+                # If not safe after arrival, this arrival state is invalid, continue searching.
+                # Do not return, just let it generate neighbors (if wait is an option to delay arrival,
+                # though wait at goal will also fail safety check until a truly safe arrival time).
+                pass
 
         if current_time >= MAX_PLANNING_TIME:
             continue
