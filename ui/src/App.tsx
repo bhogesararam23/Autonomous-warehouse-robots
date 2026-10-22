@@ -4,7 +4,6 @@ import {
   GRID_HEIGHT,
   START,
   GOAL,
-  SHELVES,
   MOVING_OBSTACLES,
   buildObstacles,
   astar,
@@ -64,6 +63,18 @@ export default function App() {
   const robotPos = path[currentStep]?.point ?? START;
   const timeStep = path[currentStep]?.timeStep ?? 0;
 
+  const pathCells = useMemo(() => {
+    const set = new Set<string>();
+    path.forEach(p => set.add(`${p.point.x},${p.point.y}`));
+    return set;
+  }, [path]);
+
+  const pastPathCells = useMemo(() => {
+    const set = new Set<string>();
+    path.slice(0, currentStep).forEach(p => set.add(`${p.point.x},${p.point.y}`));
+    return set;
+  }, [path, currentStep]);
+
   // Grid cells
   const cells = [];
   for (let y = 0; y < GRID_HEIGHT; y++) {
@@ -89,8 +100,8 @@ export default function App() {
       if (cellType === 'moving-obstacle') content = '⚠️';
 
       // Mark planned path cells
-      const isPath = path.some((p) => p.point.x === x && p.point.y === y);
-      const isPastPath = path.slice(0, currentStep).some((p) => p.point.x === x && p.point.y === y);
+      const isPath = pathCells.has(key);
+      const isPastPath = pastPathCells.has(key);
 
       cells.push(
         <div

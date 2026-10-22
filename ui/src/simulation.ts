@@ -83,6 +83,39 @@ function getNeighbors(point: Point, obstacles: Set<string>): Point[] {
   );
 }
 
+// LCM helper
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+function lcm(a: number, b: number): number {
+  return (a * b) / gcd(a, b);
+}
+
+export function getJointPeriod(movingObstacles: MovingObstacle[]): number {
+  if (movingObstacles.length === 0) return 1;
+  return movingObstacles.map((o) => o.route.length).reduce((a, b) => lcm(a, b));
+}
+
+export function isSafeAfterArrival(
+  point: Point,
+  arrivalTime: number,
+  movingObstacles: MovingObstacle[],
+  jointPeriod: number
+): boolean {
+  if (movingObstacles.length === 0) return true;
+
+  for (let t = arrivalTime; t < arrivalTime + jointPeriod; t++) {
+    for (const obstacle of movingObstacles) {
+      const pos = positionAt(obstacle.route, t);
+      if (point.x === pos.x && point.y === pos.y) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function hasDynamicCollision(
   current: Point,
   nextPoint: Point,
@@ -146,6 +179,8 @@ export function astar(
   const visited = new Set<string>();
   let expandedNodes = 0;
 
+  const jointPeriod = getJointPeriod(movingObstacles);
+
   while (!pq.isEmpty()) {
     const currentState = pq.pop()!;
     const curKey = stateKey(currentState);
@@ -155,14 +190,16 @@ export function astar(
     expandedNodes++;
 
     if (currentState.point.x === goal.x && currentState.point.y === goal.y) {
-      // Rebuild path
-      const path: State[] = [currentState];
-      let cur = currentState;
-      while (cameFrom.has(stateKey(cur))) {
-        cur = cameFrom.get(stateKey(cur))!;
-        path.push(cur);
+      if (isSafeAfterArrival(currentState.point, currentState.timeStep, movingObstacles, jointPeriod)) {
+        // Rebuild path
+        const path: State[] = [currentState];
+        let cur = currentState;
+        while (cameFrom.has(stateKey(cur))) {
+          cur = cameFrom.get(stateKey(cur))!;
+          path.push(cur);
+        }
+        return { path: path.reverse(), expandedNodes };
       }
-      return { path: path.reverse(), expandedNodes };
     }
 
     if (currentState.timeStep >= MAX_PLANNING_TIME) continue;
