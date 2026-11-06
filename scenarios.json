@@ -1,0 +1,72 @@
+{
+  "defaultScenarioId": "standard",
+  "scenarios": [
+    {
+      "id": "standard",
+      "name": "Standard warehouse",
+      "description": "The original route with a forklift and a mobile robot.",
+      "movingObstacles": [
+        {
+          "name": "Forklift-1",
+          "route": [
+            { "x": 7, "y": 9 },
+            { "x": 8, "y": 9 },
+            { "x": 9, "y": 9 },
+            { "x": 8, "y": 9 }
+          ]
+        },
+        {
+          "name": "Robot-2",
+          "route": [
+            { "x": 18, "y": 9 },
+            { "x": 19, "y": 9 },
+            { "x": 20, "y": 9 },
+            { "x": 21, "y": 9 },
+            { "x": 20, "y": 9 },
+            { "x": 19, "y": 9 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "peak-traffic",
+      "name": "Peak cross-aisle traffic",
+      "description": "Adds a pallet cart patrolling the central cross-aisle.",
+      "movingObstacles": [
+        {
+          "name": "Forklift-1",
+          "route": [
+            { "x": 7, "y": 9 },
+            { "x": 8, "y": 9 },
+            { "x": 9, "y": 9 },
+            { "x": 8, "y": 9 }
+          ]
+        },
+        {
+          "name": "Robot-2",
+          "route": [
+            { "x": 18, "y": 9 },
+            { "x": 19, "y": 9 },
+            { "x": 20, "y": 9 },
+            { "x": 21, "y": 9 },
+            { "x": 20, "y": 9 },
+            { "x": 19, "y": 9 }
+          ]
+        },
+        {
+          "name": "Pallet cart",
+          "route": [
+            { "x": 13, "y": 8 },
+            { "x": 13, "y": 9 },
+            { "x": 13, "y": 10 },
+            { "x": 13, "y": 11 },
+            { "x": 13, "y": 12 },
+            { "x": 13, "y": 11 },
+            { "x": 13, "y": 10 },
+            { "x": 13, "y": 9 }
+          ]
+        }
+      ]
+    }
+  ]
+}

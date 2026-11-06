@@ -1,3 +1,5 @@
+import scenarioConfig from '../../scenarios.json';
+
 export type Point = { x: number; y: number };
 export type State = { point: Point; timeStep: number };
 
@@ -20,28 +22,22 @@ export interface MovingObstacle {
   route: Point[];
 }
 
-export const MOVING_OBSTACLES: MovingObstacle[] = [
-  {
-    name: 'Forklift-1',
-    route: [
-      { x: 7, y: 9 },
-      { x: 8, y: 9 },
-      { x: 9, y: 9 },
-      { x: 8, y: 9 },
-    ],
-  },
-  {
-    name: 'Robot-2',
-    route: [
-      { x: 18, y: 9 },
-      { x: 19, y: 9 },
-      { x: 20, y: 9 },
-      { x: 21, y: 9 },
-      { x: 20, y: 9 },
-      { x: 19, y: 9 },
-    ],
-  },
-];
+export type ScenarioId = (typeof scenarioConfig.scenarios)[number]['id'];
+
+export interface WarehouseScenario {
+  id: ScenarioId;
+  name: string;
+  description: string;
+  movingObstacles: MovingObstacle[];
+}
+
+export const DEFAULT_SCENARIO_ID: ScenarioId = scenarioConfig.defaultScenarioId;
+
+export const SCENARIOS: readonly WarehouseScenario[] = scenarioConfig.scenarios;
+
+export const MOVING_OBSTACLES =
+  SCENARIOS.find((scenario) => scenario.id === DEFAULT_SCENARIO_ID)!
+    .movingObstacles;
 
 export function buildObstacles(): Set<string> {
   const obstacles = new Set<string>();
@@ -63,7 +59,12 @@ function manhattanDistance(a: Point, b: Point): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
-function getNeighbors(point: Point, obstacles: Set<string>): Point[] {
+function getNeighbors(
+  point: Point,
+  obstacles: Set<string>,
+  gridWidth: number,
+  gridHeight: number,
+): Point[] {
   const { x, y } = point;
   const moves = [
     { x: x + 1, y },
@@ -76,9 +77,9 @@ function getNeighbors(point: Point, obstacles: Set<string>): Point[] {
   return moves.filter(
     (n) =>
       n.x >= 0 &&
-      n.x < GRID_WIDTH &&
+      n.x < gridWidth &&
       n.y >= 0 &&
-      n.y < GRID_HEIGHT &&
+      n.y < gridHeight &&
       !obstacles.has(`${n.x},${n.y}`)
   );
 }
@@ -139,35 +140,138 @@ function hasDynamicCollision(
   return false;
 }
 
-class PriorityQueue<T> {
+export class MinPriorityQueue<T> {
   private items: { item: T; priority: number; tie: number }[] = [];
   private tieBreaker = 0;
 
   push(item: T, priority: number) {
-    this.items.push({ item, priority, tie: this.tieBreaker++ });
-    this.items.sort((a, b) => {
-      if (a.priority === b.priority) return a.tie - b.tie;
-      return a.priority - b.priority;
-    });
+    const entry = { item, priority, tie: this.tieBreaker++ };
+    this.items.push(entry);
+
+    let index = this.items.length - 1;
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (this.compare(this.items[index], this.items[parentIndex]) >= 0) break;
+      [this.items[index], this.items[parentIndex]] = [
+        this.items[parentIndex],
+        this.items[index],
+      ];
+      index = parentIndex;
+    }
   }
 
   pop(): T | undefined {
-    return this.items.shift()?.item;
+    const first = this.items[0];
+    const last = this.items.pop();
+    if (!first) return undefined;
+
+    if (this.items.length > 0) {
+      this.items[0] = last!;
+      let index = 0;
+
+      while (true) {
+        const leftIndex = index * 2 + 1;
+        const rightIndex = leftIndex + 1;
+        let smallestIndex = index;
+
+        if (
+          leftIndex < this.items.length &&
+          this.compare(this.items[leftIndex], this.items[smallestIndex]) < 0
+        ) {
+          smallestIndex = leftIndex;
+        }
+        if (
+          rightIndex < this.items.length &&
+          this.compare(this.items[rightIndex], this.items[smallestIndex]) < 0
+        ) {
+          smallestIndex = rightIndex;
+        }
+        if (smallestIndex === index) break;
+
+        [this.items[index], this.items[smallestIndex]] = [
+          this.items[smallestIndex],
+          this.items[index],
+        ];
+        index = smallestIndex;
+      }
+    }
+
+    return first.item;
   }
 
   isEmpty(): boolean {
     return this.items.length === 0;
   }
+
+  private compare(
+    a: { item: T; priority: number; tie: number },
+    b: { item: T; priority: number; tie: number },
+  ): number {
+    if (a.priority === b.priority) return a.tie - b.tie;
+    return a.priority - b.priority;
+  }
+}
+
+export interface PlannerOptions {
+  gridWidth?: number;
+  gridHeight?: number;
+  maxPlanningTime?: number;
 }
 
 export function astar(
   start: Point,
   goal: Point,
   obstacles: Set<string>,
-  movingObstacles: MovingObstacle[]
+  movingObstacles: MovingObstacle[],
+  options: PlannerOptions = {},
 ): { path: State[]; expandedNodes: number } {
+  const gridWidth = options.gridWidth ?? GRID_WIDTH;
+  const gridHeight = options.gridHeight ?? GRID_HEIGHT;
+  const maxPlanningTime = options.maxPlanningTime ?? MAX_PLANNING_TIME;
+  if (
+    !Number.isInteger(gridWidth) ||
+    gridWidth <= 0 ||
+    !Number.isInteger(gridHeight) ||
+    gridHeight <= 0
+  ) {
+    throw new RangeError('Grid dimensions must be positive integers');
+  }
+  if (!Number.isInteger(maxPlanningTime) || maxPlanningTime < 0) {
+    throw new RangeError('The planning time limit must be a non-negative integer');
+  }
+
+  const insideGrid = (point: Point) =>
+    Number.isInteger(point.x) &&
+    Number.isInteger(point.y) &&
+    point.x >= 0 &&
+    point.x < gridWidth &&
+    point.y >= 0 &&
+    point.y < gridHeight;
+  for (const obstacle of movingObstacles) {
+    if (obstacle.route.length === 0) {
+      throw new RangeError(`Moving obstacle '${obstacle.name}' route must not be empty`);
+    }
+    if (!obstacle.route.every(insideGrid)) {
+      throw new RangeError(
+        `Moving obstacle '${obstacle.name}' route points must be integer coordinates inside the grid`,
+      );
+    }
+  }
+  if (
+    !insideGrid(start) ||
+    !insideGrid(goal) ||
+    obstacles.has(`${start.x},${start.y}`) ||
+    obstacles.has(`${goal.x},${goal.y}`) ||
+    movingObstacles.some((obstacle) => {
+      const position = positionAt(obstacle.route, 0);
+      return position.x === start.x && position.y === start.y;
+    })
+  ) {
+    throw new Error('No safe path found');
+  }
+
   const startState: State = { point: start, timeStep: 0 };
-  const pq = new PriorityQueue<State>();
+  const pq = new MinPriorityQueue<State>();
   pq.push(startState, 0);
 
   const stateKey = (s: State) => `${s.point.x},${s.point.y},${s.timeStep}`;
@@ -202,9 +306,9 @@ export function astar(
       }
     }
 
-    if (currentState.timeStep >= MAX_PLANNING_TIME) continue;
+    if (currentState.timeStep >= maxPlanningTime) continue;
 
-    const neighbors = getNeighbors(currentState.point, obstacles);
+    const neighbors = getNeighbors(currentState.point, obstacles, gridWidth, gridHeight);
     const nextTime = currentState.timeStep + 1;
 
     for (const n of neighbors) {

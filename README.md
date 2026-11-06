@@ -1,24 +1,15 @@
-# warehouse a* simulation
+# Warehouse A* Simulation
 
-simple 2d warehouse sim in python to test dynamic path planning. basically sets up a grid with fixed shelves and moving obstacles like forklifts and finds a collision free path for robot using space time a*. it prints the run stats in terminal and also saves an svg visualization of the path
+A browser demo and Python command-line simulator for time-aware warehouse path planning. The simulated robot navigates around fixed shelves and predictable moving obstacles; this project is an educational simulation and does not connect to or control physical robots.
 
-also added a small react ui in `ui/` if you want to see the animation in browser instead of just terminal output
+## Requirements
 
-## how to run
+- **Web UI:** Node.js 20.19+ or 22.12+, with npm.
+- **Python CLI and tests:** Python 3.10+.
 
-### terminal simulation
+## Run the web UI
 
-make sure python 3 is installed:
-
-```bash
-python warehouse_astar_sim.py
-```
-
-this will run the sim, print the map in terminal and save `warehouse_path.svg` in the folder
-
-### web ui
-
-if you want to see the frontend:
+From the repository root:
 
 ```bash
 cd ui
@@ -26,61 +17,61 @@ npm install
 npm run dev
 ```
 
-then just open `http://localhost:5173/` in browser
+Open the local URL printed by Vite (usually `http://localhost:5173/`). The UI runs in the browser; no separate backend is needed. See [`ui/README.md`](ui/README.md) for UI controls and frontend checks.
 
-## how it works
+## Run the Python simulator
 
-### grid & coords
-the warehouse is a 24x14 grid
-* x is column (0 to 23 left to right)
-* y is row (0 to 13 top to bottom)
-* robot starts at `(1, 1)` and tries to reach `(22, 12)`
-
-### obstacles
-* shelves: defined like `("Name", x, y, width, height)` and gets converted into blocked cells so robot cant pass through them
-* moving obstacles: they just loop through a list of coordinates every tick like a forklift patrolling an aisle
-
-### space-time a*
-normal a* only checks `(x, y)` which breaks when obstacles are moving around. cell `(8, 9)` might be blocked at t=3 by a forklift but totally free at t=2 or t=4
-
-so the search state tracks time too:
-```text
-((x, y), time_step)
-```
-
-robot can move up, down, left, right or just wait in place if it needs to let a moving obstacle pass first. no diagonal moves
-
-### collision checks
-planner checks two things so it doesnt crash:
-1. same cell collision - robot and obstacle landing on the same coordinate at the same time step
-2. edge swap collision - robot moving from cell A to B while obstacle moves from B to A at the exact same time (basically walking through each other)
-
-### path finding
-* uses manhattan distance for heuristic since diagonals arent allowed: `abs(x1 - x2) + abs(y1 - y2)`
-* uses pythons `heapq` module as priority queue so it expands lowest cost nodes first
-* once it hits the goal it checks **terminal safety** for a full joint cycle (LCM of all moving obstacle route lengths). The robot only arrives at the goal if it can wait indefinitely without being hit by periodic obstacles.
-* if safe, it backtracks using `came_from` and reverses it to get the final path
-
-## tests
+From the repository root:
 
 ```bash
-# run the terminal python simulation
-python warehouse_astar_sim.py
+# Standard warehouse (the default)
+python3 warehouse_astar_sim.py
 
-# run python path validator and unittests
-python -m unittest test_warehouse.py
+# Peak cross-aisle traffic
+python3 warehouse_astar_sim.py --scenario peak-traffic
 
-# run typescript unittests (inside ui/)
+# Skip the SVG artifact (useful for automated smoke tests)
+python3 warehouse_astar_sim.py --no-svg
+```
+
+The CLI prints a planning summary and ASCII map. By default, a successful plan also writes `warehouse_path.svg` beside `warehouse_astar_sim.py`, replacing that output file on each successful run. Pass `--no-svg` to skip the visualization file. Use `python3 warehouse_astar_sim.py --help` to see the available CLI options.
+
+## Scenarios and map
+
+Both the UI and Python implementation read their scenario definitions from the shared root-level [`scenarios.json`](scenarios.json):
+
+| Scenario | CLI ID | Moving obstacles |
+| --- | --- | --- |
+| **Standard warehouse** (default) | `standard` | A forklift and another mobile robot following repeating routes. |
+| **Peak cross-aisle traffic** | `peak-traffic` | The standard obstacles plus a pallet cart patrolling the central cross-aisle. |
+
+The default warehouse is 24 columns by 14 rows. Coordinates use `(x, y)`, with `x` increasing left to right and `y` increasing top to bottom. The robot starts at `(1, 1)` and plans to reach `(22, 12)` around three fixed shelf blocks.
+
+## How planning works
+
+The planner uses time-aware A*: each search state includes both a grid location and a time step. It can move one cell up, down, left, or right, or wait in place. Moving obstacle routes repeat cyclically. Candidate moves are rejected if they would cause either a same-cell collision or a head-on edge swap with a moving obstacle. A goal arrival is accepted only when the goal remains safe for a complete joint cycle of all moving-obstacle routes.
+
+Both planner APIs support custom grid dimensions and a larger planning horizon. The current UI and Python CLI launch with the standard 24×14 map and the default 120-step planning limit; the CLI does not provide command-line flags for custom dimensions or horizon. The Python `astar` function accepts `grid_width`, `grid_height`, and `max_planning_time`; the TypeScript `astar` function accepts the corresponding `gridWidth`, `gridHeight`, and `maxPlanningTime` options.
+
+The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor.
+
+## Tests and CI checks
+
+Run the discoverable Python unit tests from the repository root:
+
+```bash
+python3 -m unittest discover -v
+```
+
+The collision demonstration files are named `collision_demo.py` and `collision_demo_after_arrival.py`, so unittest discovery does not treat them as tests.
+
+Run the UI test, lint, and production build from `ui/`:
+
+```bash
+cd ui
 npm run test:ts
+npm run lint
+npm run build
 ```
 
-## terminal map symbols
-
-```text
-S = start
-G = goal
-# = shelf / obstacle
-M = moving obstacle at t=0
-* = planned path
-. = empty floor
-```
+CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, ESLint, and production build on Node.js 22. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import heapq
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,28 +43,63 @@ class MovingObstacle:
         return self.route[time_step % len(self.route)]
 
 
-MOVING_OBSTACLES = [
-    MovingObstacle(
-        "Forklift-1",
-        (
-            (7, 9),
-            (8, 9),
-            (9, 9),
-            (8, 9),
-        ),
-    ),
-    MovingObstacle(
-        "Robot-2",
-        (
-            (18, 9),
-            (19, 9),
-            (20, 9),
-            (21, 9),
-            (20, 9),
-            (19, 9),
-        ),
-    ),
-]
+@dataclass(frozen=True)
+class WarehouseScenario:
+    id: str
+    name: str
+    description: str
+    moving_obstacles: list[MovingObstacle]
+
+
+SCENARIO_CONFIG_PATH = Path(__file__).with_name("scenarios.json")
+with SCENARIO_CONFIG_PATH.open(encoding="utf-8") as scenario_file:
+    SCENARIO_CONFIG = json.load(scenario_file)
+
+DEFAULT_SCENARIO_ID = SCENARIO_CONFIG["defaultScenarioId"]
+SCENARIOS: dict[str, WarehouseScenario] = {
+    scenario_data["id"]: WarehouseScenario(
+        id=scenario_data["id"],
+        name=scenario_data["name"],
+        description=scenario_data["description"],
+        moving_obstacles=[
+            MovingObstacle(
+                name=obstacle_data["name"],
+                route=tuple(
+                    (point["x"], point["y"])
+                    for point in obstacle_data["route"]
+                ),
+            )
+            for obstacle_data in scenario_data["movingObstacles"]
+        ],
+    )
+    for scenario_data in SCENARIO_CONFIG["scenarios"]
+}
+MOVING_OBSTACLES = SCENARIOS[DEFAULT_SCENARIO_ID].moving_obstacles
+
+
+def get_scenario(scenario_id: str = DEFAULT_SCENARIO_ID) -> WarehouseScenario:
+    """Return a configured warehouse scenario by its CLI id."""
+    try:
+        return SCENARIOS[scenario_id]
+    except KeyError as error:
+        raise ValueError(f"Unknown warehouse scenario: {scenario_id}") from error
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line options, defaulting to the original warehouse."""
+    parser = argparse.ArgumentParser(description="Plan a safe warehouse robot route.")
+    parser.add_argument(
+        "--scenario",
+        choices=list(SCENARIOS),
+        default=DEFAULT_SCENARIO_ID,
+        help="warehouse scenario to simulate (default: standard)",
+    )
+    parser.add_argument(
+        "--no-svg",
+        action="store_true",
+        help="skip writing the warehouse_path.svg visualization",
+    )
+    return parser.parse_args(argv)
 
 
 def build_obstacles() -> set[Point]:
@@ -82,7 +119,12 @@ def manhattan_distance(a: Point, b: Point) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-def get_neighbors(point: Point, obstacles: set[Point]) -> list[Point]:
+def get_neighbors(
+    point: Point,
+    obstacles: set[Point],
+    grid_width: int = GRID_WIDTH,
+    grid_height: int = GRID_HEIGHT,
+) -> list[Point]:
     """Return valid cells the robot can move to from the current cell."""
     x, y = point
     possible_moves = [
@@ -96,7 +138,7 @@ def get_neighbors(point: Point, obstacles: set[Point]) -> list[Point]:
     valid_neighbors: list[Point] = []
     for neighbor in possible_moves:
         nx, ny = neighbor
-        inside_grid = 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT
+        inside_grid = 0 <= nx < grid_width and 0 <= ny < grid_height
         blocked = neighbor in obstacles
 
         if inside_grid and not blocked:
@@ -183,8 +225,48 @@ def astar(
     goal: Point,
     obstacles: set[Point],
     moving_obstacles: list[MovingObstacle],
+    *,
+    grid_width: int = GRID_WIDTH,
+    grid_height: int = GRID_HEIGHT,
+    max_planning_time: int = MAX_PLANNING_TIME,
 ) -> tuple[list[State], int]:
     """Find the shortest safe path from start to goal with time-aware A*."""
+    if (
+        type(grid_width) is not int
+        or grid_width <= 0
+        or type(grid_height) is not int
+        or grid_height <= 0
+    ):
+        raise ValueError("Grid dimensions must be positive integers.")
+    if type(max_planning_time) is not int or max_planning_time < 0:
+        raise ValueError("The planning time limit must be a non-negative integer.")
+
+    def inside_grid(point: Point) -> bool:
+        x, y = point
+        return (
+            type(x) is int
+            and type(y) is int
+            and 0 <= x < grid_width
+            and 0 <= y < grid_height
+        )
+
+    for obstacle in moving_obstacles:
+        if not obstacle.route:
+            raise ValueError(
+                f"Moving obstacle '{obstacle.name}' route must not be empty."
+            )
+        if any(not inside_grid(point) for point in obstacle.route):
+            raise ValueError(
+                f"Moving obstacle '{obstacle.name}' route points must be integer coordinates inside the grid."
+            )
+
+    if not inside_grid(start) or not inside_grid(goal):
+        raise ValueError("Start and goal must be inside the grid.")
+    if start in obstacles or goal in obstacles:
+        raise ValueError("Start and goal must not be blocked by static obstacles.")
+    if any(start == obstacle.position_at(0) for obstacle in moving_obstacles):
+        raise RuntimeError("No safe path found before the planning time limit.")
+
     start_state = (start, 0)
     open_set: list[tuple[int, int, int, State]] = []
     heapq.heappush(open_set, (0, 0, 0, start_state))
@@ -217,10 +299,10 @@ def astar(
                 # though wait at goal will also fail safety check until a truly safe arrival time).
                 pass
 
-        if current_time >= MAX_PLANNING_TIME:
+        if current_time >= max_planning_time:
             continue
 
-        for neighbor in get_neighbors(current, obstacles):
+        for neighbor in get_neighbors(current, obstacles, grid_width, grid_height):
             next_time = current_time + 1
 
             if has_dynamic_collision(current, neighbor, next_time, moving_obstacles):
@@ -291,10 +373,14 @@ def simulate_path(
     return collisions, failures
 
 
-def make_ascii_map(obstacles: set[Point], path: list[State]) -> str:
+def make_ascii_map(
+    obstacles: set[Point],
+    path: list[State],
+    moving_obstacles: list[MovingObstacle] = MOVING_OBSTACLES,
+) -> str:
     """Create a simple terminal visualization."""
     path_cells = {point for point, _ in path}
-    start_dynamic_positions = moving_obstacle_positions(MOVING_OBSTACLES, 0)
+    start_dynamic_positions = moving_obstacle_positions(moving_obstacles, 0)
     rows: list[str] = []
 
     for y in range(GRID_HEIGHT):
@@ -449,7 +535,10 @@ def save_svg(
     output_path.write_text("\n".join(parts), encoding="utf-8")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    scenario = get_scenario(args.scenario)
+    moving_obstacles = scenario.moving_obstacles
     obstacles = build_obstacles()
     failures = 0
 
@@ -459,41 +548,44 @@ def main() -> None:
     if GOAL in obstacles:
         raise ValueError("The goal position is inside a shelf.")
 
-    if START in moving_obstacle_positions(MOVING_OBSTACLES, 0):
+    if START in moving_obstacle_positions(moving_obstacles, 0):
         raise ValueError("The start position is occupied by a moving obstacle.")
 
     start_time = time.perf_counter()
     try:
-        path, expanded_nodes = astar(START, GOAL, obstacles, MOVING_OBSTACLES)
+        path, expanded_nodes = astar(START, GOAL, obstacles, moving_obstacles)
     except RuntimeError as error:
         failures += 1
         elapsed_seconds = time.perf_counter() - start_time
 
         print("Dynamic A* warehouse planning log")
         print("---------------------------------")
+        print(f"Scenario: {scenario.name}")
         print(f"Grid size: {GRID_WIDTH} columns x {GRID_HEIGHT} rows")
         print(f"Start: {START}")
         print(f"Goal: {GOAL}")
-        print(f"Moving obstacles: {len(MOVING_OBSTACLES)}")
+        print(f"Moving obstacles: {len(moving_obstacles)}")
         print(f"Time taken: {elapsed_seconds * 1000:.3f} ms")
         print("Collisions: 0")
         print(f"Failures: {failures}")
         print(f"Failure reason: {error}")
         return
     elapsed_seconds = time.perf_counter() - start_time
-    collisions, simulation_failures = simulate_path(path, MOVING_OBSTACLES)
+    collisions, simulation_failures = simulate_path(path, moving_obstacles)
     failures += simulation_failures
 
-    output_path = Path(__file__).with_name("warehouse_path.svg")
-    save_svg(obstacles, path, MOVING_OBSTACLES, output_path)
+    if not args.no_svg:
+        output_path = Path(__file__).with_name("warehouse_path.svg")
+        save_svg(obstacles, path, moving_obstacles, output_path)
 
     print("Dynamic A* warehouse planning log")
     print("---------------------------------")
+    print(f"Scenario: {scenario.name}")
     print(f"Grid size: {GRID_WIDTH} columns x {GRID_HEIGHT} rows")
     print(f"Start: {START}")
     print(f"Goal: {GOAL}")
-    print(f"Moving obstacles: {len(MOVING_OBSTACLES)}")
-    for obstacle in MOVING_OBSTACLES:
+    print(f"Moving obstacles: {len(moving_obstacles)}")
+    for obstacle in moving_obstacles:
         print(f"  - {obstacle.name}: {list(obstacle.route)}")
     print(f"Path length: {len(path) - 1} time steps")
     print(f"Cells in path: {len(path)}")
@@ -502,9 +594,10 @@ def main() -> None:
     print(f"Time taken: {elapsed_seconds * 1000:.3f} ms")
     print(f"Collisions: {collisions}")
     print(f"Failures: {failures}")
-    print(f"SVG visualization: {output_path}")
+    if not args.no_svg:
+        print(f"SVG visualization: {output_path}")
     print()
-    print(make_ascii_map(obstacles, path))
+    print(make_ascii_map(obstacles, path, moving_obstacles))
 
 
 if __name__ == "__main__":

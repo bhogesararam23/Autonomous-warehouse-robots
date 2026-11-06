@@ -169,6 +169,118 @@ button {
 
 .reset-btn { background: #475569; }
 .reset-btn:hover { background: #334155; }
+button:focus-visible,
+.timeline-slider:focus-visible,
+.playback-speed:focus-visible,
+.scenario-select:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.scenario-control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.scenario-control label {
+  font-weight: 600;
+}
+
+.scenario-select,
+.playback-speed {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 6px;
+  background: #1e293b;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.scenario-description {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline-heading {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.timeline-heading label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.timeline-heading output {
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.timeline-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.speed-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.step-controls {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.step-btn {
+  padding: 0.65rem 0.5rem;
+  background: #334155;
+  font-size: 0.85rem;
+}
+
+.step-btn:hover:not(:disabled) {
+  background: #475569;
+}
+
+.step-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.shortcut-hint {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.shortcut-hint kbd {
+  display: inline-block;
+  margin: 0 0.15rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.75rem;
+}
 
 .stats h2, .legend h2 {
   font-size: 1.2rem;
@@ -213,6 +325,50 @@ button {
 
 @media (max-width: 900px) {
   .main-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .app-container {
+    padding: 1rem;
+  }
+
+  .header {
+    margin-bottom: 1.5rem;
+  }
+
+  .header h1 {
+    font-size: clamp(1.75rem, 7vw, 2rem);
+  }
+
+  .subtitle {
+    font-size: 1rem;
+  }
+
+  .main-content {
+    gap: 1.25rem;
+  }
+
+  .grid-container {
+    grid-template-columns: repeat(var(--grid-w), minmax(0, 1fr));
+    gap: 1px;
+  }
+
+  .panel {
+    padding: 1rem;
+    gap: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell,
+  button {
+    transition: none;
+  }
+
+  .cell.robot {
+    animation: none;
+    transform: none;
   }
 }

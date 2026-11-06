@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run Python unit tests
+        run: python -m unittest discover
+
+      - name: Smoke-test standard warehouse
+        run: python warehouse_astar_sim.py --no-svg
+
+      - name: Smoke-test peak-traffic scenario
+        run: python warehouse_astar_sim.py --scenario peak-traffic --no-svg
+
+  ui:
+    name: UI checks (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Run TypeScript tests
+        working-directory: ui
+        run: npm run test:ts
+
+      - name: Run ESLint
+        working-directory: ui
+        run: npm run lint
+
+      - name: Build production UI
+        working-directory: ui
+        run: npm run build
