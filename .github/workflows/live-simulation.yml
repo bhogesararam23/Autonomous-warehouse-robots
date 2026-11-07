@@ -1,0 +1,194 @@
+name: Live A300 simulation regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Simulation regression to run
+        required: true
+        type: choice
+        options:
+          - both
+          - nav2
+          - rmf-fleet
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  live-simulation:
+    name: Headless Gazebo / Nav2 / Open-RMF
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base-noble
+    timeout-minutes: 180
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: "1"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Record hosted-runner capabilities
+        id: diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_root="$RUNNER_TEMP/live-simulation-artifacts"
+          mkdir -p "$artifact_root/diagnostics"
+          {
+            echo "# Live simulation runner diagnostics"
+            echo
+            echo "- Image: \`ros:jazzy-ros-base-noble\` on GitHub-hosted \`ubuntu-24.04\`"
+            echo "- Requested suite: \`${{ inputs.suite }}\`"
+            echo "- CPU cores visible to container: $(nproc)"
+            echo "- Memory visible to container: $(awk '/MemTotal/ { printf \"%.1f GiB\", $2 / 1048576 }' /proc/meminfo)"
+            echo "- Software OpenGL requested: \`LIBGL_ALWAYS_SOFTWARE=1\`"
+            if [[ -d /dev/dri ]]; then
+              echo "- Host graphics devices exposed:"
+              find /dev/dri -maxdepth 1 -type c -printf '  - %f\n' | sort || true
+            else
+              echo "- Host graphics devices exposed: none at /dev/dri"
+            fi
+            echo
+            echo "## Disk"
+            df -h "$RUNNER_TEMP" || true
+          } | tee "$artifact_root/diagnostics/runner.md"
+          printf 'Runner diagnostics are saved with the workflow artifacts.\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install ROS workspace and simulation dependencies
+        id: dependencies
+        timeout-minutes: 40
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="/usr/bin:$PATH"
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            cmake \
+            libegl1 \
+            libgl1-mesa-dri \
+            mesa-utils
+          source /opt/ros/jazzy/setup.bash
+          rosdep update
+          rosdep install \
+            --from-paths ros2_ws/src \
+            --ignore-src \
+            --rosdistro jazzy \
+            --skip-keys ament_python \
+            -r -y
+          {
+            echo
+            echo "## Installed simulation stack"
+            echo "- ROS 2 Jazzy and repository rosdep dependencies installed."
+            echo "- Gazebo / Clearpath / Nav2 / Open-RMF package checks:"
+            for package in clearpath_gz clearpath_nav2_demos nav2_bringup rmf_fleet_adapter; do
+              if ros2 pkg prefix "$package" >/dev/null 2>&1; then
+                echo "  - \`$package\`: available"
+              else
+                echo "  - \`$package\`: missing"
+                exit 1
+              fi
+            done
+          } | tee -a "$RUNNER_TEMP/live-simulation-artifacts/diagnostics/runner.md"
+
+      - name: Build workspace and validate RMF assets
+        id: build
+        timeout-minutes: 40
+        shell: bash
+        run: ./scripts/test_ros2_workspace.sh
+
+      - name: Run headless A300 Nav2 end-to-end regression
+        id: nav2
+        if: ${{ success() && (inputs.suite == 'both' || inputs.suite == 'nav2') }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_SMOKE_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/nav2
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/nav2/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_SMOKE_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/nav2-workflow.log"
+
+      - name: Run headless two-A300 Open-RMF fleet regression
+        id: rmf_fleet
+        if: ${{ success() && (inputs.suite == 'both' || inputs.suite == 'rmf-fleet') }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_RMF_FLEET_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/rmf-fleet
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/rmf-fleet/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/rmf-fleet-workflow.log"
+
+      - name: Upload simulation logs, JSON results, and runner diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-a300-simulation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/live-simulation-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Summarize outcomes and fail on any incomplete requested check
+        if: always()
+        shell: bash
+        env:
+          REQUESTED_SUITE: ${{ inputs.suite }}
+          DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          NAV2_OUTCOME: ${{ steps.nav2.outcome }}
+          RMF_OUTCOME: ${{ steps.rmf_fleet.outcome }}
+        run: |
+          set -euo pipefail
+          artifact_root="$RUNNER_TEMP/live-simulation-artifacts"
+          {
+            echo "## Live A300 simulation regression"
+            echo
+            echo "Requested suite: \`$REQUESTED_SUITE\`"
+            echo
+            echo "| Stage | Outcome |"
+            echo "| --- | --- |"
+            echo "| Dependency installation | $DEPENDENCIES_OUTCOME |"
+            echo "| Workspace build and RMF asset validation | $BUILD_OUTCOME |"
+            if [[ "$REQUESTED_SUITE" == both || "$REQUESTED_SUITE" == nav2 ]]; then
+              echo "| Single-A300 Nav2 simulation | $NAV2_OUTCOME |"
+            else
+              echo "| Single-A300 Nav2 simulation | not requested |"
+            fi
+            if [[ "$REQUESTED_SUITE" == both || "$REQUESTED_SUITE" == rmf-fleet ]]; then
+              echo "| Two-A300 Open-RMF fleet simulation | $RMF_OUTCOME |"
+            else
+              echo "| Two-A300 Open-RMF fleet simulation | not requested |"
+            fi
+            echo
+            echo "Runner resource and graphics details, simulation logs, and any generated result JSON are attached as the workflow artifact. A failed or timed-out run is not a pass; use the logs and runner diagnostics to distinguish a simulation assertion from hosted-runner resource or graphics limitations. This remains a simulation regression, not a physical-robot safety test."
+            echo
+            echo "### Available JSON result files"
+            if [[ -d "$artifact_root" ]]; then
+              find "$artifact_root" -type f -name '*.json' -print | sed "s#^$artifact_root/##" | sort | sed 's/^/- `/' | sed 's/$/`/' || true
+            else
+              echo "No simulation artifact directory was created."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$DEPENDENCIES_OUTCOME" != success || "$BUILD_OUTCOME" != success ]]; then
+            echo "The simulation workflow did not complete its prerequisites; see the step logs and uploaded diagnostics." >&2
+            exit 1
+          fi
+          if [[ ("$REQUESTED_SUITE" == both || "$REQUESTED_SUITE" == nav2) && "$NAV2_OUTCOME" != success ]]; then
+            echo "The requested Nav2 simulation did not pass (outcome: $NAV2_OUTCOME)." >&2
+            exit 1
+          fi
+          if [[ ("$REQUESTED_SUITE" == both || "$REQUESTED_SUITE" == rmf-fleet) && "$RMF_OUTCOME" != success ]]; then
+            echo "The requested Open-RMF fleet simulation did not pass (outcome: $RMF_OUTCOME)." >&2
+            exit 1
+          fi
+          echo "All requested live simulation regressions passed."
