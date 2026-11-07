@@ -49,6 +49,35 @@ jobs:
       - name: Compile and test the ROS-independent planner core
         run: ./scripts/test_cpp_core.sh
 
+  ros2-workspace:
+    name: ROS 2 Jazzy workspace and Open-RMF assets
+    runs-on: ubuntu-24.04
+    container:
+      image: ros:jazzy-ros-base-noble
+    timeout-minutes: 35
+    steps:
+      - name: Install CMake
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends cmake
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Refresh rosdep and install workspace dependencies
+        run: |
+          rosdep update
+          # ament_python is a ROS build type, not a resolvable rosdep system key.
+          rosdep install \
+            --from-paths ros2_ws/src \
+            --ignore-src \
+            --rosdistro jazzy \
+            --skip-keys ament_python \
+            -r -y
+
+      - name: Build and test ROS packages and Open-RMF assets
+        run: ./scripts/test_ros2_workspace.sh
+
   ui:
     name: UI checks (Node 22)
     runs-on: ubuntu-latest
