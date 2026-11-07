@@ -44,7 +44,8 @@ jobs:
             echo "- Image: \`ros:jazzy-ros-base-noble\` on GitHub-hosted \`ubuntu-24.04\`"
             echo "- Requested suite: \`${{ inputs.suite }}\`"
             echo "- CPU cores visible to container: $(nproc)"
-            echo "- Memory visible to container: $(awk '/MemTotal/ { printf \"%.1f GiB\", $2 / 1048576 }' /proc/meminfo)"
+            memory_kib="$(awk '/MemTotal/ { print $2; exit }' /proc/meminfo)"
+            echo "- Memory visible to container: $((memory_kib / 1048576)) GiB"
             echo "- Software OpenGL requested: \`LIBGL_ALWAYS_SOFTWARE=1\`"
             if [[ -d /dev/dri ]]; then
               echo "- Host graphics devices exposed:"
@@ -63,7 +64,7 @@ jobs:
         timeout-minutes: 40
         shell: bash
         run: |
-          set -euo pipefail
+          set -eo pipefail
           export PATH="/usr/bin:$PATH"
           apt-get update
           apt-get install -y --no-install-recommends \
