@@ -149,6 +149,8 @@ For this test only, the runner copies the world and generated A300 profile to a 
 
 Before running, build and source the workspace as described above. The generated Clearpath profile and instrumented world are temporary; the repository's robot configuration, installed world, and generated user profile are not modified. ROS domain 57 and a unique Gazebo Transport partition are used by default; set `HUSKY_SMOKE_DOMAIN_ID` or `HUSKY_SMOKE_GZ_PARTITION` to override them. Logs, the contact-geometry manifest, and `result.json` are retained in the printed run directory on success or failure. The runner shuts down the simulator, SLAM, and Nav2 process groups when it exits.
 
+This regression is also available in the [manual live-simulation GitHub Actions workflow](LIVE_SIMULATION_CI.md), which uploads logs, runner diagnostics, and generated result JSON. Hosted-runner timing and graphics resources can vary; see that guide for the limits and how to interpret a failed run.
+
 The test was exercised in the real headless Gazebo simulation: `NavigateToPose` returned `SUCCEEDED` with error code 0, the goal was `(1.30, 0.00)` and the final pose was `(1.054, 0.008)` (0.247 m XY error, within tolerance), all 17 contact publishers were verified, and no non-floor contacts were observed.
 
 ## Model and safety boundary

@@ -74,13 +74,15 @@ npm run lint
 npm run build
 ```
 
-CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally.
+CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally. The real headless Gazebo regressions are available in a separate [manual-only GitHub Actions workflow](docs/LIVE_SIMULATION_CI.md) and are not part of push/pull-request CI.
 
 ## ROS 2 / Gazebo simulation
 
 The repository also contains a ROS 2 Jazzy Nav2 A* planner plugin for the Clearpath Husky A300 simulation, using the vendor-supported Gazebo Harmonic warehouse world. See [`docs/HUSKY_A300_SIMULATION.md`](docs/HUSKY_A300_SIMULATION.md) for the planner design, A300 specifications, setup steps, launch commands, and simulation-only safety boundary. After installing the documented dependencies, run `./scripts/test_ros2_workspace.sh` from the repository root to build both ROS packages, run their package tests, and validate the Open-RMF graph and fleet configuration. The existing Python and browser demonstrations remain available as before.
 
 For a repeatable headless `NavigateToPose` run through the custom planner and the standard controller, use [`scripts/test_husky_nav2_e2e.sh`](scripts/test_husky_nav2_e2e.sh); the procedure and its collision-check limits are documented in the simulation guide.
+
+The [manual live-simulation workflow](docs/LIVE_SIMULATION_CI.md) can also run the real Nav2 and two-A300 Open-RMF regressions on demand and preserve their logs and result JSON as downloadable artifacts.
 
 ## Open-RMF A300 fleet
 

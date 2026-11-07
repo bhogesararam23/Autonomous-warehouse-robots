@@ -55,6 +55,8 @@ The launch stages the second Clearpath spawn, each SLAM/Nav2 stack, and the RMF 
 
 The runner creates disposable A300 profiles and a contact-instrumented warehouse world under `/tmp`; it does not modify the checked-in Clearpath profile. Before dispatch, it checks every segment and destination on each assigned A300's route for known-free live SLAM occupancy. On completion it prints the run directory and writes `fleet_result.json` with those map checks, task outcomes, final poses, schedule evidence, and contact counts. Logs and generated evidence are preserved when a test fails.
 
+The same two-robot regression can be selected in the [manual live-simulation GitHub Actions workflow](LIVE_SIMULATION_CI.md). It runs on demand rather than on every push and uploads the fleet result JSON, logs, and hosted-runner diagnostics for review.
+
 ## Manual use
 
 The runner's printed `/tmp/husky-rmf-fleet.<id>` directory contains the generated profiles and contact-enabled world. To run the fleet launch manually, source the built workspace and reuse that directory:
