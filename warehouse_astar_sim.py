@@ -340,13 +340,41 @@ def count_wait_steps(path: list[State]) -> int:
 
 
 def simulate_path(
-    path: list[State], moving_obstacles: list[MovingObstacle]
+    path: list[State],
+    moving_obstacles: list[MovingObstacle],
+    *,
+    obstacles: set[Point] | None = None,
+    grid_width: int = GRID_WIDTH,
+    grid_height: int = GRID_HEIGHT,
 ) -> tuple[int, int]:
-    """Replay the path and count collisions or execution failures."""
+    """Replay a path and count dynamic collisions or invalid execution steps.
+
+    By default, replay uses the standard warehouse dimensions and shelves.
+    Pass ``obstacles`` and dimensions explicitly for a custom map.
+    """
+    if type(grid_width) is not int or grid_width <= 0:
+        raise ValueError("Grid width must be a positive integer.")
+    if type(grid_height) is not int or grid_height <= 0:
+        raise ValueError("Grid height must be a positive integer.")
+
+    blocked_cells = build_obstacles() if obstacles is None else obstacles
     collisions = 0
     failures = 0
 
+    if not path:
+        return collisions, 1
+
     for index, (robot_position, time_step) in enumerate(path):
+        x, y = robot_position
+        inside_grid = (
+            type(x) is int
+            and type(y) is int
+            and 0 <= x < grid_width
+            and 0 <= y < grid_height
+        )
+        if not inside_grid or robot_position in blocked_cells:
+            failures += 1
+
         dynamic_positions = moving_obstacle_positions(moving_obstacles, time_step)
 
         if robot_position in dynamic_positions:
@@ -359,6 +387,12 @@ def simulate_path(
         if time_step != previous_time + 1:
             failures += 1
 
+        previous_x, previous_y = previous_robot_position
+        if type(previous_x) is not int or type(previous_y) is not int:
+            failures += 1
+        elif inside_grid and abs(x - previous_x) + abs(y - previous_y) > 1:
+            failures += 1
+
         for obstacle in moving_obstacles:
             obstacle_previous = obstacle.position_at(previous_time)
             obstacle_current = obstacle.position_at(time_step)
@@ -367,7 +401,7 @@ def simulate_path(
                 and robot_position == obstacle_previous
             )
 
-            if robot_swapped_with_obstacle:
+            if time_step == previous_time + 1 and robot_swapped_with_obstacle:
                 collisions += 1
 
     return collisions, failures
@@ -535,7 +569,7 @@ def save_svg(
     output_path.write_text("\n".join(parts), encoding="utf-8")
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     scenario = get_scenario(args.scenario)
     moving_obstacles = scenario.moving_obstacles
@@ -569,9 +603,11 @@ def main(argv: list[str] | None = None) -> None:
         print("Collisions: 0")
         print(f"Failures: {failures}")
         print(f"Failure reason: {error}")
-        return
+        return 1
     elapsed_seconds = time.perf_counter() - start_time
-    collisions, simulation_failures = simulate_path(path, moving_obstacles)
+    collisions, simulation_failures = simulate_path(
+        path, moving_obstacles, obstacles=obstacles
+    )
     failures += simulation_failures
 
     if not args.no_svg:
@@ -598,7 +634,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"SVG visualization: {output_path}")
     print()
     print(make_ascii_map(obstacles, path, moving_obstacles))
+    return 1 if collisions or failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

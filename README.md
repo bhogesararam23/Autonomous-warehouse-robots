@@ -63,7 +63,7 @@ Run the discoverable Python unit tests from the repository root:
 python3 -m unittest discover -v
 ```
 
-The collision demonstration files are named `collision_demo.py` and `collision_demo_after_arrival.py`, so unittest discovery does not treat them as tests.
+The collision demos are named `collision_demo.py` and `collision_demo_after_arrival.py`, so unittest does not discover them by filename. The Python test suite runs both explicitly: one demonstrates an edge-swap collision, and the other demonstrates a collision after an unsafe arrival.
 
 Run the UI test, lint, and production build from `ui/`:
 

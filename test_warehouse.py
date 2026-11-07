@@ -1,5 +1,8 @@
 import json
 from collections import deque
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
@@ -82,8 +85,9 @@ class TestWarehousePlanner(unittest.TestCase):
     def test_cli_skips_svg_generation_when_requested(self):
         with patch("warehouse_astar_sim.save_svg") as save_svg:
             with redirect_stdout(StringIO()) as output:
-                main(["--no-svg"])
+                exit_code = main(["--no-svg"])
 
+        self.assertEqual(exit_code, 0)
         save_svg.assert_not_called()
         self.assertIn("Path length: 42 time steps", output.getvalue())
         self.assertNotIn("SVG visualization:", output.getvalue())
@@ -91,10 +95,69 @@ class TestWarehousePlanner(unittest.TestCase):
     def test_cli_generates_svg_by_default(self):
         with patch("warehouse_astar_sim.save_svg") as save_svg:
             with redirect_stdout(StringIO()) as output:
-                main([])
+                exit_code = main([])
 
+        self.assertEqual(exit_code, 0)
         save_svg.assert_called_once()
         self.assertIn("SVG visualization:", output.getvalue())
+
+    def test_cli_planning_failure_returns_nonzero(self):
+        with patch("warehouse_astar_sim.astar", side_effect=RuntimeError("no path")):
+            with redirect_stdout(StringIO()) as output:
+                exit_code = main(["--no-svg"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Failure reason: no path", output.getvalue())
+
+    def test_cli_replay_failure_returns_nonzero(self):
+        invalid_path = [((1, 1), 0), ((23, 13), 1)]
+        with patch("warehouse_astar_sim.astar", return_value=(invalid_path, 1)):
+            with redirect_stdout(StringIO()):
+                exit_code = main(["--no-svg"])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_collision_demos_run_and_report_expected_collision(self):
+        repo_root = Path(__file__).resolve().parent
+        demos = (
+            ("collision_demo.py", "Collisions detected: 1"),
+            ("collision_demo_after_arrival.py", "Collisions after arrival: 1"),
+        )
+
+        for script, expected_output in demos:
+            with self.subTest(script=script):
+                result = subprocess.run(
+                    [sys.executable, str(repo_root / script)],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(expected_output, result.stdout)
+
+    def test_simulate_path_counts_spatial_and_static_failures(self):
+        invalid_paths = (
+            ([((0, 0), 0), ((2, 0), 1)], set(), 3, 1),
+            ([((0, 0), 0), ((3, 0), 1)], set(), 3, 1),
+            ([((0, 0), 0), ((1, 0), 1)], {(1, 0)}, 3, 1),
+            ([((0, 0), 0), ((1, 0), 2)], set(), 3, 1),
+        )
+
+        for path, obstacles, grid_width, grid_height in invalid_paths:
+            with self.subTest(path=path, obstacles=obstacles):
+                self.assertEqual(
+                    simulate_path(
+                        path,
+                        [],
+                        obstacles=obstacles,
+                        grid_width=grid_width,
+                        grid_height=grid_height,
+                    ),
+                    (0, 1),
+                )
+
+        self.assertEqual(simulate_path([], [], obstacles=set()), (0, 1))
 
     def test_peak_traffic_scenario_is_collision_safe(self):
         scenario = get_scenario("peak-traffic")
@@ -169,7 +232,13 @@ class TestWarehousePlanner(unittest.TestCase):
             grid_width=grid_width,
             grid_height=grid_height,
         )
-        collisions, failures = simulate_path(path, moving_obstacles)
+        collisions, failures = simulate_path(
+            path,
+            moving_obstacles,
+            obstacles=obstacles,
+            grid_width=grid_width,
+            grid_height=grid_height,
+        )
         self.assertEqual(collisions, 0)
         self.assertEqual(failures, 0)
 
