@@ -36,21 +36,14 @@ In every run both RMF task IDs cleared and both robots were idle at the final sa
 
 ## Build and validate
 
-From the repository root, source ROS 2 Jazzy and build the ROS workspace:
+From the repository root, source ROS 2 Jazzy and run the complete workspace validation:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd ros2_ws
-colcon build --symlink-install
-source install/setup.bash
-cd ..
+./scripts/test_ros2_workspace.sh
 ```
 
-Validate that the generated four-waypoint graph, charger points, shared mutex zone, and RMF parser agree:
-
-```bash
-./scripts/test_rmf_fleet_assets.sh
-```
+This builds both workspace packages, runs their registered tests, and validates that the generated four-waypoint graph, charger points, shared mutex zone, and RMF parser agree. The separate asset-only command `./scripts/test_rmf_fleet_assets.sh` is also available after the workspace has already been built.
 
 Then run the complete two-robot simulation smoke test:
 
