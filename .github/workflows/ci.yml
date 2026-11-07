@@ -38,6 +38,17 @@ jobs:
       - name: Smoke-test peak-traffic scenario
         run: python warehouse_astar_sim.py --scenario peak-traffic --no-svg
 
+  cpp-core:
+    name: C++ A* core
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Compile and test the ROS-independent planner core
+        run: ./scripts/test_cpp_core.sh
+
   ui:
     name: UI checks (Node 22)
     runs-on: ubuntu-latest

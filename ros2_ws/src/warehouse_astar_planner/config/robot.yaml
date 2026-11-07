@@ -1,0 +1,43 @@
+# Simulation profile based on Clearpath's official A300 Nav2 configuration example.
+# The robot description, attachments, and sensors are supplied by Clearpath packages.
+serial_number: a300-00000
+version: 0
+system:
+  hosts:
+    - hostname: cpr-a300-00000
+      ip: 127.0.0.1
+  ros2:
+    namespace: a300_00000
+platform:
+  enable_ekf: true
+  controller: ps4
+  battery:
+    model: S_24V20_U1
+    configuration: S1P2
+  attachments:
+    - name: front_bumper
+      type: a300.bumper
+      parent: front_bumper_mount
+    - name: rear_bumper
+      type: a300.bumper
+      parent: rear_bumper_mount
+    - name: top_plate
+      type: a300.top_plate
+  mcu:
+    protocol: proton
+sensors:
+  imu:
+    - model: phidgets_spatial
+      urdf_enabled: true
+      launch_enabled: true
+      parent: base_link
+      xyz: [0.059, 0.0, 0.161275]
+      rpy: [0.0, 0.0, 0.0]
+      ros_parameters:
+        phidgets_spatial:
+          data_interval_ms: 20
+  lidar2d:
+    - model: hokuyo_ust
+      urdf_enabled: true
+      launch_enabled: true
+      parent: default_mount

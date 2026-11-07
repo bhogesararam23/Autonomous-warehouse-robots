@@ -75,3 +75,13 @@ npm run build
 ```
 
 CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, ESLint, and production build on Node.js 22. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering.
+
+## ROS 2 / Gazebo simulation
+
+The repository also contains a ROS 2 Jazzy Nav2 A* planner plugin for the Clearpath Husky A300 simulation, using the vendor-supported Gazebo Harmonic warehouse world. See [`docs/HUSKY_A300_SIMULATION.md`](docs/HUSKY_A300_SIMULATION.md) for the planner design, A300 specifications, setup steps, launch commands, and simulation-only safety boundary. The existing Python and browser demonstrations remain available as before.
+
+For a repeatable headless `NavigateToPose` run through the custom planner and the standard controller, use [`scripts/test_husky_nav2_e2e.sh`](scripts/test_husky_nav2_e2e.sh); the procedure and its collision-check limits are documented in the simulation guide.
+
+## Open-RMF A300 fleet
+
+The simulation workspace now includes a two-robot Open-RMF fleet slice with namespaced A300s, RMF task dispatch and traffic scheduling, the existing Nav2 A* planner, and a shared-aisle navigation graph. See [`docs/OPEN_RMF_A300_FLEET.md`](docs/OPEN_RMF_A300_FLEET.md) for the architecture, coordinate-frame model, setup, and usage. With ROS 2 Jazzy and the workspace dependencies installed, [`scripts/test_husky_rmf_fleet.sh`](scripts/test_husky_rmf_fleet.sh) runs the headless two-A300 smoke; [`scripts/test_rmf_fleet_assets.sh`](scripts/test_rmf_fleet_assets.sh) validates the generated graph and RMF configuration.

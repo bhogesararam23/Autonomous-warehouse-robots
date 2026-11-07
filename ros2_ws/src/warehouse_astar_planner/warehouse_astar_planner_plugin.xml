@@ -1,0 +1,7 @@
+<library path="warehouse_astar_planner">
+  <class
+    type="warehouse_astar_planner::AStarPlanner"
+    base_class_type="nav2_core::GlobalPlanner">
+    <description>8-connected, cost-aware A* over a Nav2 2D costmap snapshot.</description>
+  </class>
+</library>

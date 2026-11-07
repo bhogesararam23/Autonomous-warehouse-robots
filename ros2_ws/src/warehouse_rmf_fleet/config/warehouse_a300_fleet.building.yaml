@@ -1,0 +1,25 @@
+coordinate_system: reference_image
+name: warehouse_a300_fleet
+levels:
+  L1:
+    elevation: 0
+    flattened_x_offset: 0
+    flattened_y_offset: 0
+    floors: []
+    doors: []
+    measurements:
+      - [0, 1, {distance: [3, 1.0]}]
+    vertices:
+      - [0, 0, 0, a300_00000_start, {is_charger: [4, true], is_holding_point: [4, true]}]
+      - [100, 0, 0, goal_west, {is_holding_point: [4, true]}]
+      - [250, 0, 0, goal_east, {is_holding_point: [4, true]}]
+      - [350, 0, 0, a300_00001_start, {is_charger: [4, true], is_holding_point: [4, true]}]
+    lanes:
+      - [0, 1, {bidirectional: [4, true], graph_idx: [2, 0], mutex: [1, "a300_shared_aisle"], orientation: [1, ""], speed_limit: [3, 0]}]
+      - [1, 2, {bidirectional: [4, true], graph_idx: [2, 0], mutex: [1, "a300_shared_aisle"], orientation: [1, ""], speed_limit: [3, 0]}]
+      - [2, 3, {bidirectional: [4, true], graph_idx: [2, 0], mutex: [1, "a300_shared_aisle"], orientation: [1, ""], speed_limit: [3, 0]}]
+    layers: {}
+    models: []
+    walls: []
+lifts: {}
+graphs: {}

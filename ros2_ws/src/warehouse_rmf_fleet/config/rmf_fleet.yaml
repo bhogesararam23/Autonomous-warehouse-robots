@@ -1,0 +1,54 @@
+# RMF schedule model for two simulated Clearpath Husky A300 robots.
+# Coordinates in the graph are facility/world coordinates. Each local SLAM map
+# is anchored at the robot spawn pose and rotated to match that robot's heading.
+rmf_fleet:
+  name: warehouse_a300_fleet
+  limits:
+    linear: [0.4, 0.5]       # m/s, m/s^2; conservative scheduling envelope
+    angular: [0.6, 1.0]      # rad/s, rad/s^2
+  profile:
+    footprint: 0.61          # m, circumscribed radius for 0.990 x 0.698 m base
+    vicinity: 0.85           # m, scheduling clearance around the footprint
+  reversible: false
+  battery_system:
+    voltage: 24.0
+    capacity: 20.0
+    charging_current: 5.0
+  mechanical_system:
+    mass: 80.0
+    moment_of_inertia: 9.78   # rectangular-envelope estimate; unused below
+    friction_coefficient: 0.22
+  ambient_system:
+    power: 20.0
+  tool_system:
+    power: 0.0
+  recharge_threshold: 0.10
+  recharge_soc: 1.0
+  publish_fleet_state: 5.0
+  account_for_battery_drain: false
+  task_capabilities:
+    loop: true
+    delivery: false
+    clean: false
+  finishing_request: nothing
+  robots:
+    a300_00000:
+      charger: a300_00000_start
+    a300_00001:
+      charger: a300_00001_start
+
+# Bridge-specific interface data. This remains outside rmf_fleet so it is not
+# interpreted as an RMF fleet-adapter configuration field.
+robot_interfaces:
+  a300_00000:
+    namespace: a300_00000
+    map_frame: map
+    base_frame: base_link
+    map_origin_in_rmf: [0.0, 0.0, 0.0]
+    spawn_pose_in_rmf: [0.0, 0.0, 0.0]
+  a300_00001:
+    namespace: a300_00001
+    map_frame: map
+    base_frame: base_link
+    map_origin_in_rmf: [3.5, 0.0, 3.141592653589793]
+    spawn_pose_in_rmf: [3.5, 0.0, 3.141592653589793]

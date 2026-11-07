@@ -1,0 +1,15 @@
+planner_server:
+  ros__parameters:
+    GridBased:
+      plugin: warehouse_astar_planner::AStarPlanner
+      allow_unknown: false
+      cost_penalty: 2.0
+      unknown_cost_multiplier: 5.0
+      max_expansions: 250000
+controller_server:
+  ros__parameters:
+    general_goal_checker:
+      # Tighter than Clearpath's 0.25 m / 0.25 rad defaults; smoke acceptance
+      # remains wider to preserve a measured margin for simulation variability.
+      xy_goal_tolerance: 0.05
+      yaw_goal_tolerance: 0.10

@@ -1,0 +1,37 @@
+building_name: warehouse_a300_fleet
+doors: {}
+levels:
+  L1:
+    lanes:
+    - - 0
+      - 1
+      - {mutex: a300_shared_aisle}
+    - - 1
+      - 0
+      - {mutex: a300_shared_aisle}
+    - - 1
+      - 2
+      - {mutex: a300_shared_aisle}
+    - - 2
+      - 1
+      - {mutex: a300_shared_aisle}
+    - - 2
+      - 3
+      - {mutex: a300_shared_aisle}
+    - - 3
+      - 2
+      - {mutex: a300_shared_aisle}
+    vertices:
+    - - 0.0
+      - 0.0
+      - {is_charger: true, is_holding_point: true, name: a300_00000_start}
+    - - 1.0
+      - 0.0
+      - {is_holding_point: true, name: goal_west}
+    - - 2.5
+      - 0.0
+      - {is_holding_point: true, name: goal_east}
+    - - 3.5
+      - 0.0
+      - {is_charger: true, is_holding_point: true, name: a300_00001_start}
+lifts: {}
