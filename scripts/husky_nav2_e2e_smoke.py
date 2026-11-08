@@ -83,6 +83,8 @@ class NavigationSmokeNode(Node):
         self.scan_message_count = 0
         self.last_lidar_probe: dict[str, Any] | None = None
         self.last_feedback_wall_time = 0.0
+        self.latest_feedback_distance_remaining_m: float | None = None
+        self.feedback_message_count = 0
         self.plan_message_count = 0
         self.latest_plan_points: list[tuple[float, float]] = []
         self.plan_history: list[list[tuple[float, float]]] = []
@@ -561,8 +563,10 @@ class NavigationSmokeNode(Node):
 
     def feedback(self, wrapped_feedback) -> None:
         now = time.monotonic()
+        remaining = float(wrapped_feedback.feedback.distance_remaining)
+        self.latest_feedback_distance_remaining_m = remaining
+        self.feedback_message_count += 1
         if now - self.last_feedback_wall_time >= 5.0:
-            remaining = float(wrapped_feedback.feedback.distance_remaining)
             print(f"NavigateToPose active: {remaining:.2f} m remaining", flush=True)
             self.last_feedback_wall_time = now
 
@@ -1021,13 +1025,121 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
                 + json.dumps(node.contact_hits[:5])
             )
 
-        dispatch_plan_count, action_error_code = dispatch_navigation_goal(
-            node,
-            args,
-            plugins,
-            (goal_x, goal_y, goal_yaw),
-            f"NavigateToPose smoke goal ({goal_selection})",
-        )
+        plan_count_before_dispatch = node.plan_message_count
+        feedback_count_before_dispatch = node.feedback_message_count
+        try:
+            dispatch_plan_count, action_error_code = dispatch_navigation_goal(
+                node,
+                args,
+                plugins,
+                (goal_x, goal_y, goal_yaw),
+                f"NavigateToPose smoke goal ({goal_selection})",
+            )
+        except SmokeTestError as error:
+            if args.fault_injection == "blocked-aisle":
+                plans_after_dispatch = node.plan_history[plan_count_before_dispatch:]
+                endpoint_tolerance = max(0.5, args.xy_tolerance_m)
+                matching_plans = []
+                for plan in plans_after_dispatch:
+                    if len(plan) < 2:
+                        continue
+                    start_error = math.hypot(
+                        plan[0][0] - start_pose[0], plan[0][1] - start_pose[1]
+                    )
+                    goal_error = math.hypot(
+                        plan[-1][0] - goal_x, plan[-1][1] - goal_y
+                    )
+                    if (
+                        start_error <= endpoint_tolerance
+                        and goal_error <= endpoint_tolerance
+                    ):
+                        matching_plans.append((plan, start_error, goal_error))
+                if matching_plans:
+                    selected_plan = matching_plans[-1][0]
+                elif plans_after_dispatch:
+                    selected_plan = plans_after_dispatch[-1]
+                else:
+                    selected_plan = []
+                plan_start_error = (
+                    math.hypot(
+                        selected_plan[0][0] - start_pose[0],
+                        selected_plan[0][1] - start_pose[1],
+                    )
+                    if len(selected_plan) >= 2
+                    else None
+                )
+                plan_goal_error = (
+                    math.hypot(
+                        selected_plan[-1][0] - goal_x,
+                        selected_plan[-1][1] - goal_y,
+                    )
+                    if len(selected_plan) >= 2
+                    else None
+                )
+                try:
+                    plan_deviation = (
+                        max_cross_track_deviation(
+                            selected_plan,
+                            (start_pose[0], start_pose[1]),
+                            (goal_x, goal_y),
+                        )
+                        if len(selected_plan) >= 2
+                        else None
+                    )
+                except ValueError:
+                    plan_deviation = None
+                current_pose_map = None
+                current_xy_error = None
+                current_pose_error = None
+                try:
+                    current_pose = node.pose_in_map(2.0)
+                    current_pose_map = {
+                        "x": current_pose[0],
+                        "y": current_pose[1],
+                        "yaw": current_pose[2],
+                    }
+                    current_xy_error = math.hypot(
+                        current_pose[0] - goal_x, current_pose[1] - goal_y
+                    )
+                except Exception as pose_error:
+                    current_pose_error = str(pose_error)
+                args.failure_evidence["navigation_failure"] = {
+                    "reason": str(error),
+                    "goal_selection": goal_selection,
+                    "start_pose_map": {
+                        "x": start_pose[0],
+                        "y": start_pose[1],
+                        "yaw": start_pose[2],
+                    },
+                    "goal_pose_map": {
+                        "x": goal_x,
+                        "y": goal_y,
+                        "yaw": goal_yaw,
+                    },
+                    "current_pose_map": current_pose_map,
+                    "current_pose_lookup_error": current_pose_error,
+                    "current_xy_error_m": current_xy_error,
+                    "feedback_messages_after_dispatch": (
+                        node.feedback_message_count - feedback_count_before_dispatch
+                    ),
+                    "last_feedback_distance_remaining_m": (
+                        node.latest_feedback_distance_remaining_m
+                    ),
+                    "plan_messages_after_dispatch": (
+                        node.plan_message_count - plan_count_before_dispatch
+                    ),
+                    "matching_endpoint_plan_count": len(matching_plans),
+                    "latest_plan_start_error_m": plan_start_error,
+                    "latest_plan_goal_error_m": plan_goal_error,
+                    "latest_plan_cross_track_deviation_m": plan_deviation,
+                    "latest_plan_points_map": [
+                        {"x": point_x, "y": point_y}
+                        for point_x, point_y in selected_plan[:400]
+                    ],
+                    "latest_plan_points_truncated": len(selected_plan) > 400,
+                    "non_floor_contacts": node.contact_hits[:10],
+                }
+            raise
 
         max_plan_deviation = None
         if args.fault_injection == "blocked-aisle":
