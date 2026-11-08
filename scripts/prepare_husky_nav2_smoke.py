@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -11,6 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import escape
+
+from fault_injection import blocked_aisle_model_sdf, validate_blocked_aisle_model
 
 
 def run(command: list[str], *, capture: bool = False) -> str:
@@ -156,23 +159,56 @@ def main() -> int:
     parser.add_argument("--source-world", required=True, type=Path)
     parser.add_argument("--output-world", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--fault-model-output", type=Path)
     parser.add_argument("--robot-namespace", default="a300_00000")
+    parser.add_argument(
+        "--fault-injection", choices=("none", "blocked-aisle"), default="none"
+    )
     parser.add_argument("--skip-world-instrumentation", action="store_true")
     args = parser.parse_args()
 
     try:
+        if args.skip_world_instrumentation and args.fault_injection != "none":
+            raise ValueError("Fault injection cannot be combined with --skip-world-instrumentation")
         sensors = instrument_robot(
             args.setup_path, args.manifest, args.robot_namespace
         )
         if not args.skip_world_instrumentation:
             instrument_world(args.source_world, args.output_world)
-    except (OSError, subprocess.CalledProcessError, ET.ParseError, RuntimeError) as error:
+        fault_metadata: dict[str, object] = {"scenario": "none"}
+        if args.fault_injection == "blocked-aisle":
+            if args.fault_model_output is None:
+                raise ValueError("blocked-aisle requires --fault-model-output")
+            model_sdf = blocked_aisle_model_sdf()
+            validated_template = validate_blocked_aisle_model(model_sdf)
+            fault_metadata = {
+                key: validated_template[key]
+                for key in (
+                    "scenario",
+                    "model",
+                    "size_xyz_m",
+                    "static",
+                    "minimum_planner_cross_track_deviation_m",
+                )
+            }
+            fault_metadata["injection_timing"] = "after-known-free-map-preflight"
+            fault_metadata["model_template_sha256"] = hashlib.sha256(
+                model_sdf.encode("utf-8")
+            ).hexdigest()
+            fault_metadata["model_file"] = str(args.fault_model_output.resolve())
+            args.fault_model_output.parent.mkdir(parents=True, exist_ok=True)
+            args.fault_model_output.write_text(model_sdf, encoding="utf-8")
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        manifest["fault_injection"] = fault_metadata
+        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    except (OSError, subprocess.CalledProcessError, ET.ParseError, RuntimeError, ValueError) as error:
         print(f"Smoke-test instrumentation failed: {error}", file=sys.stderr)
         return 1
 
     print(
         f"Prepared disposable headless test assets: {len(sensors)} contact sensors; "
-        f"namespace={args.robot_namespace}; world={args.output_world}; "
+        f"namespace={args.robot_namespace}; fault={fault_metadata['scenario']}; "
+        f"world={args.output_world}; "
         f"manifest={args.manifest}"
     )
     return 0

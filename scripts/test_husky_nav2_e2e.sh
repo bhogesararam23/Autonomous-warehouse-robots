@@ -14,6 +14,24 @@ run_dir="$(mktemp -d "$run_root/husky-nav2-e2e.XXXXXX")"
 setup_dir="$run_dir/clearpath"
 world_file="$run_dir/warehouse_contacts.sdf"
 manifest="$run_dir/contact_manifest.json"
+fault_model="$run_dir/blocked_aisle_obstacle.sdf"
+fault_injection="${HUSKY_SMOKE_FAULT:-none}"
+smoke_fault_args=()
+smoke_fault_model_args=()
+case "$fault_injection" in
+  none) ;;
+  blocked-aisle)
+    smoke_fault_args=(
+      --fault-injection blocked-aisle
+      --minimum-goal-distance-m 2.0
+    )
+    smoke_fault_model_args=(--fault-model-file "$fault_model")
+    ;;
+  *)
+    echo "Unsupported HUSKY_SMOKE_FAULT: $fault_injection" >&2
+    exit 2
+    ;;
+esac
 mkdir -p "$setup_dir"
 
 sim_pid=""
@@ -109,6 +127,8 @@ python3 "$helper" \
   --source-world "$clearpath_gz_share/worlds/warehouse.sdf" \
   --output-world "$world_file" \
   --manifest "$manifest" \
+  --fault-model-output "$fault_model" \
+  --fault-injection "$fault_injection" \
   >>"$run_dir/prepare.log" 2>&1
 contact_count="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["contact_sensor_count"])' "$manifest")"
 
@@ -161,7 +181,12 @@ set +e
 python3 "$smoke_client" \
   --contact-count "$contact_count" \
   --result-file "$run_dir/result.json" \
+  --fault-manifest "$manifest" \
+  --world-file "$world_file" \
+  --action-timeout "${HUSKY_SMOKE_ACTION_TIMEOUT:-180}" \
+  "${smoke_fault_model_args[@]}" \
   "$@" \
+  "${smoke_fault_args[@]}" \
   > >(tee "$run_dir/smoke.log") 2>&1
 smoke_status=$?
 set -e
