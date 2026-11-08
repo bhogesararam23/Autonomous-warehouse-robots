@@ -38,8 +38,8 @@ from ros_gz_interfaces.msg import Contacts
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 from nav2_fault_profile import (
-    FAULT_GOAL_XY_TOLERANCE_M,
-    FAULT_GOAL_YAW_TOLERANCE_RAD,
+    SMOKE_XY_TOLERANCE_M,
+    SMOKE_YAW_TOLERANCE_RAD,
 )
 from fault_injection import (
     BLOCKED_AISLE_MIN_DETOUR_M,
@@ -1308,10 +1308,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clearance-m", type=float, default=0.65)
     parser.add_argument("--max-occupancy", type=int, default=20)
     parser.add_argument(
-        "--xy-tolerance-m", type=float, default=FAULT_GOAL_XY_TOLERANCE_M
+        "--xy-tolerance-m", type=float, default=SMOKE_XY_TOLERANCE_M
     )
     parser.add_argument(
-        "--yaw-tolerance-rad", type=float, default=FAULT_GOAL_YAW_TOLERANCE_RAD
+        "--yaw-tolerance-rad", type=float, default=SMOKE_YAW_TOLERANCE_RAD
     )
     return parser.parse_args()
 

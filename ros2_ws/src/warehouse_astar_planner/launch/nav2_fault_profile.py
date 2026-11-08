@@ -6,8 +6,10 @@ import math
 from typing import Any
 
 
-FAULT_GOAL_XY_TOLERANCE_M = 0.35
-FAULT_GOAL_YAW_TOLERANCE_RAD = 0.35
+SMOKE_XY_TOLERANCE_M = 0.35
+SMOKE_YAW_TOLERANCE_RAD = 0.35
+FAULT_GOAL_XY_TOLERANCE_M = SMOKE_XY_TOLERANCE_M
+FAULT_GOAL_YAW_TOLERANCE_RAD = 0.25
 FAULT_PROGRESS_MOVEMENT_ALLOWANCE_S = 30.0
 
 
@@ -24,9 +26,10 @@ def _positive_number(settings: dict[str, Any], name: str, label: str) -> float:
 def apply_fault_test_profile(params: dict[str, Any]) -> dict[str, Any]:
     """Align action completion with the smoke acceptance in the fault run.
 
-    The controller goal checker uses the same 0.35 m / 0.35 rad thresholds as the
-    smoke client's independent final-pose assertion. The profile also extends the
-    progress checker's movement window while retaining its required movement radius.
+    The controller XY tolerance matches the smoke's 0.35 m final-pose limit because
+    the base 0.25 m setting stalled just outside that bound. Yaw retains Clearpath's
+    stricter 0.25 rad tolerance; the smoke independently allows up to 0.35 rad.
+    The profile also extends progress timing without changing the movement radius.
     """
     controller = params.get("controller_server", {}).get("ros__parameters")
     if not isinstance(controller, dict):

@@ -15,6 +15,8 @@ sys.path.insert(0, str(LAUNCH_DIR))
 from nav2_fault_profile import (
     FAULT_GOAL_XY_TOLERANCE_M,
     FAULT_GOAL_YAW_TOLERANCE_RAD,
+    SMOKE_XY_TOLERANCE_M,
+    SMOKE_YAW_TOLERANCE_RAD,
     apply_fault_test_profile,
 )
 
@@ -39,7 +41,7 @@ class Nav2FaultProfileTest(unittest.TestCase):
             }
         }
 
-    def test_fault_profile_matches_smoke_thresholds_and_extends_allowance(self):
+    def test_fault_profile_matches_xy_and_keeps_stricter_yaw(self):
         params = self.sample_parameters()
         metadata = apply_fault_test_profile(params)
         controller = params["controller_server"]["ros__parameters"]
@@ -48,7 +50,7 @@ class Nav2FaultProfileTest(unittest.TestCase):
             controller["general_goal_checker"]["xy_goal_tolerance"], 0.35
         )
         self.assertEqual(
-            controller["general_goal_checker"]["yaw_goal_tolerance"], 0.35
+            controller["general_goal_checker"]["yaw_goal_tolerance"], 0.25
         )
         self.assertEqual(
             controller["progress_checker"]["required_movement_radius"], 0.5
@@ -60,9 +62,11 @@ class Nav2FaultProfileTest(unittest.TestCase):
         self.assertEqual(metadata["goal_checker_default_xy_tolerance_m"], 0.25)
         self.assertEqual(metadata["goal_checker_default_yaw_tolerance_rad"], 0.25)
         self.assertEqual(metadata["goal_checker_xy_tolerance_m"], 0.35)
-        self.assertEqual(metadata["goal_checker_yaw_tolerance_rad"], 0.35)
-        self.assertEqual(FAULT_GOAL_XY_TOLERANCE_M, 0.35)
-        self.assertEqual(FAULT_GOAL_YAW_TOLERANCE_RAD, 0.35)
+        self.assertEqual(metadata["goal_checker_yaw_tolerance_rad"], 0.25)
+        self.assertEqual(FAULT_GOAL_XY_TOLERANCE_M, SMOKE_XY_TOLERANCE_M)
+        self.assertEqual(FAULT_GOAL_YAW_TOLERANCE_RAD, 0.25)
+        self.assertEqual(SMOKE_XY_TOLERANCE_M, 0.35)
+        self.assertEqual(SMOKE_YAW_TOLERANCE_RAD, 0.35)
 
     def test_fault_profile_rejects_missing_goal_checker_plugin(self):
         params = self.sample_parameters()
