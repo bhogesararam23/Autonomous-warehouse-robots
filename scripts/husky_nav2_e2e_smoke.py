@@ -548,6 +548,75 @@ def spawn_blocked_aisle(
     }
 
 
+def dispatch_navigation_goal(
+    node: NavigationSmokeNode,
+    args: argparse.Namespace,
+    plugins: dict[str, Any],
+    goal_pose: tuple[float, float, float],
+    purpose: str,
+) -> tuple[int, int]:
+    goal_x, goal_y, goal_yaw = goal_pose
+    goal = NavigateToPose.Goal()
+    goal.pose = PoseStamped()
+    goal.pose.header.frame_id = "map"
+    goal.pose.header.stamp = node.get_clock().now().to_msg()
+    goal.pose.pose.position.x = goal_x
+    goal.pose.pose.position.y = goal_y
+    goal.pose.pose.position.z = 0.0
+    goal.pose.pose.orientation.z = math.sin(goal_yaw / 2.0)
+    goal.pose.pose.orientation.w = math.cos(goal_yaw / 2.0)
+
+    print(
+        f"Sending {purpose} through {plugins['global_planner']} with "
+        f"{plugins['controller']}: map({goal_x:.2f}, {goal_y:.2f}, "
+        f"yaw={goal_yaw:.2f})",
+        flush=True,
+    )
+    dispatch_plan_count = node.plan_message_count
+    send_future = node.action_client.send_goal_async(
+        goal, feedback_callback=node.feedback
+    )
+    deadline = time.monotonic() + args.action_timeout
+    while time.monotonic() < deadline and not send_future.done():
+        rclpy.spin_once(node, timeout_sec=0.1)
+    if not send_future.done():
+        raise SmokeTestError(f"Timed out while submitting {purpose}")
+    goal_handle = send_future.result()
+    if goal_handle is None or not goal_handle.accepted:
+        raise SmokeTestError(f"Nav2 rejected {purpose}")
+
+    result_future = goal_handle.get_result_async()
+    while time.monotonic() < deadline and not result_future.done():
+        rclpy.spin_once(node, timeout_sec=0.1)
+        if node.contact_hits:
+            goal_handle.cancel_goal_async()
+            raise SmokeTestError(
+                f"Gazebo reported robot contact with a non-floor model during {purpose}: "
+                + json.dumps(node.contact_hits[:5])
+            )
+    if not result_future.done():
+        goal_handle.cancel_goal_async()
+        raise SmokeTestError(
+            f"{purpose} did not finish within {args.action_timeout:.0f}s"
+        )
+    wrapped_result = result_future.result()
+    if wrapped_result is None:
+        raise SmokeTestError(f"{purpose} returned no action result")
+    if wrapped_result.status != GoalStatus.STATUS_SUCCEEDED:
+        error_code = getattr(wrapped_result.result, "error_code", "unknown")
+        error_msg = getattr(wrapped_result.result, "error_msg", "")
+        raise SmokeTestError(
+            f"{purpose} did not succeed: status={wrapped_result.status}, "
+            f"error_code={error_code}, error_msg={error_msg!r}"
+        )
+    action_error_code = int(getattr(wrapped_result.result, "error_code", 0))
+    if action_error_code != 0:
+        raise SmokeTestError(
+            f"{purpose} status succeeded but error_code={action_error_code}"
+        )
+    return dispatch_plan_count, action_error_code
+
+
 def run_test(args: argparse.Namespace) -> dict[str, Any]:
     fault_manifest: dict[str, Any] = {"scenario": "none"}
     if args.fault_manifest is not None:
@@ -619,6 +688,76 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
             args.startup_timeout,
         )
         start_pose = node.pose_in_map(args.startup_timeout)
+        mapping_warmup: dict[str, Any] | None = None
+        if args.fault_injection == "blocked-aisle" and args.goal_x is None:
+            warmup_start = start_pose
+            warmup_args = argparse.Namespace(**vars(args))
+            warmup_args.minimum_goal_distance_m = 1.25
+            warmup_goal_x, warmup_goal_y, warmup_goal_yaw, warmup_selection = (
+                node.select_goal_pose(warmup_start, warmup_args)
+            )
+            warmup_distance = math.hypot(
+                warmup_goal_x - warmup_start[0], warmup_goal_y - warmup_start[1]
+            )
+            if warmup_distance < warmup_args.minimum_goal_distance_m:
+                raise SmokeTestError(
+                    "SLAM mapping warmup goal is too close to the current pose: "
+                    f"{warmup_distance:.2f} m"
+                )
+            warmup_clearance = min(0.25, args.clearance_m)
+            node.assert_map_corridor_clear(
+                warmup_start,
+                warmup_goal_x,
+                warmup_goal_y,
+                warmup_clearance,
+                args.max_occupancy,
+            )
+            warmup_dispatch_plan_count, warmup_action_error_code = (
+                dispatch_navigation_goal(
+                    node,
+                    args,
+                    plugins,
+                    (warmup_goal_x, warmup_goal_y, warmup_goal_yaw),
+                    "known-free SLAM mapping warmup goal",
+                )
+            )
+            warmup_finished_wall_time = time.monotonic()
+            node.wait_until(
+                "fresh SLAM and odometry updates after the mapping warmup",
+                lambda: node.last_map_wall_time is not None
+                and node.last_map_wall_time >= warmup_finished_wall_time
+                and node.last_odom_wall_time is not None
+                and node.last_odom_wall_time >= warmup_finished_wall_time,
+                min(args.startup_timeout, 15.0),
+            )
+            start_pose = node.pose_in_map(10.0)
+            mapping_warmup = {
+                "performed": True,
+                "start_pose_map": {
+                    "x": warmup_start[0],
+                    "y": warmup_start[1],
+                    "yaw": warmup_start[2],
+                },
+                "goal_pose_map": {
+                    "x": warmup_goal_x,
+                    "y": warmup_goal_y,
+                    "yaw": warmup_goal_yaw,
+                },
+                "goal_selection": warmup_selection,
+                "route_distance_m": warmup_distance,
+                "approach_corridor_clearance_m": warmup_clearance,
+                "map_and_odometry_updated_after_goal": True,
+                "plan_messages_before_dispatch": warmup_dispatch_plan_count,
+                "action_error_code": warmup_action_error_code,
+                "result": "known-free staging goal succeeded; fresh SLAM and odometry received",
+                "final_pose_map": {
+                    "x": start_pose[0],
+                    "y": start_pose[1],
+                    "yaw": start_pose[2],
+                },
+            }
+            args.failure_evidence["mapping_warmup"] = mapping_warmup
+
         goal_x, goal_y, goal_yaw, goal_selection = node.select_goal_pose(
             start_pose, args
         )
@@ -661,65 +800,13 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
                 + json.dumps(node.contact_hits[:5])
             )
 
-        goal = NavigateToPose.Goal()
-        goal.pose = PoseStamped()
-        goal.pose.header.frame_id = "map"
-        goal.pose.header.stamp = node.get_clock().now().to_msg()
-        goal.pose.pose.position.x = goal_x
-        goal.pose.pose.position.y = goal_y
-        goal.pose.pose.position.z = 0.0
-        goal.pose.pose.orientation.z = math.sin(goal_yaw / 2.0)
-        goal.pose.pose.orientation.w = math.cos(goal_yaw / 2.0)
-
-        print(
-            "Sending NavigateToPose through "
-            f"{plugins['global_planner']} with {plugins['controller']}: "
-            f"map({goal_x:.2f}, {goal_y:.2f}, yaw={goal_yaw:.2f}) "
-            f"[selection={goal_selection}]",
-            flush=True,
+        dispatch_plan_count, action_error_code = dispatch_navigation_goal(
+            node,
+            args,
+            plugins,
+            (goal_x, goal_y, goal_yaw),
+            f"NavigateToPose smoke goal ({goal_selection})",
         )
-        dispatch_plan_count = node.plan_message_count
-        send_future = node.action_client.send_goal_async(
-            goal, feedback_callback=node.feedback
-        )
-        deadline = time.monotonic() + args.action_timeout
-        while time.monotonic() < deadline and not send_future.done():
-            rclpy.spin_once(node, timeout_sec=0.1)
-        if not send_future.done():
-            raise SmokeTestError("Timed out while submitting NavigateToPose")
-        goal_handle = send_future.result()
-        if goal_handle is None or not goal_handle.accepted:
-            raise SmokeTestError("Nav2 rejected the NavigateToPose goal")
-
-        result_future = goal_handle.get_result_async()
-        while time.monotonic() < deadline and not result_future.done():
-            rclpy.spin_once(node, timeout_sec=0.1)
-            if node.contact_hits:
-                goal_handle.cancel_goal_async()
-                raise SmokeTestError(
-                    "Gazebo reported robot contact with a non-floor model during navigation: "
-                    + json.dumps(node.contact_hits[:5])
-                )
-        if not result_future.done():
-            goal_handle.cancel_goal_async()
-            raise SmokeTestError(
-                f"NavigateToPose did not finish within {args.action_timeout:.0f}s"
-            )
-        wrapped_result = result_future.result()
-        if wrapped_result is None:
-            raise SmokeTestError("NavigateToPose returned no action result")
-        if wrapped_result.status != GoalStatus.STATUS_SUCCEEDED:
-            error_code = getattr(wrapped_result.result, "error_code", "unknown")
-            error_msg = getattr(wrapped_result.result, "error_msg", "")
-            raise SmokeTestError(
-                "NavigateToPose action did not succeed: "
-                f"status={wrapped_result.status}, error_code={error_code}, error_msg={error_msg!r}"
-            )
-        action_error_code = getattr(wrapped_result.result, "error_code", 0)
-        if int(action_error_code) != 0:
-            raise SmokeTestError(
-                f"NavigateToPose status succeeded but error_code={action_error_code}"
-            )
 
         max_plan_deviation = None
         if args.fault_injection == "blocked-aisle":
@@ -846,6 +933,7 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
                     else "goal neighborhood and selected approach corridor are known free in SLAM occupancy grid"
                 ),
             },
+            "mapping_warmup": mapping_warmup,
         }
     finally:
         node.destroy_node()
@@ -880,6 +968,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.failure_evidence = {}
     if args.contact_count <= 0:
         print("contact-count must be positive", file=sys.stderr)
         return 2
@@ -902,6 +991,7 @@ def main() -> int:
             "status": "failed",
             "reason": str(error),
             "fault_injection": args.fault_injection,
+            **args.failure_evidence,
         }
         write_result(result_path, result)
         print(f"FAIL: {error}", file=sys.stderr, flush=True)
