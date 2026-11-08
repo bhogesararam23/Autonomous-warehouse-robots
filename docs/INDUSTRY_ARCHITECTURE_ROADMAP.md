@@ -6,15 +6,15 @@
 
 Keep the current project as a simulation and visualization product while making its simulation core trustworthy, extensible, and testable. Do not connect the current browser UI or A* function directly to physical robot motion. If a ROS 2-based product is the goal, treat Nav2 as a candidate for per-robot navigation and evaluate Open-RMF for fleet-level coordination; neither replaces a machine-specific safety system. Nav2 separates navigation into middleware/lifecycle, task orchestration, navigation servers, state estimation, and environmental representation [1]. Open-RMF provides coordination and interoperability concepts for fleets and facility infrastructure [2] [3].
 
-The immediate build should be **Phase 1, simulation foundation**, after a short Phase 0 decision gate confirms the intended product, robot/fleet assumptions, and safety boundary. This preserves the working demo while creating a reliable base for later multi-robot and ROS integration.
+The near-term focus is to keep hardening the simulation and fleet reliability gates while maintaining the explicitly simulation-only target stack: Clearpath Husky A300, ROS 2 Jazzy, Gazebo Harmonic, Nav2, and Open-RMF. Several foundations from Phases 2–4 are now implemented in simulation; the phases below remain capability goals, not evidence that their exit criteria or any physical safety requirements have been met.
 
 ## What the repository contains today
 
-The repository at the reviewed `main` revision (`0ab05fc`) contains a Python command-line simulator and a React/TypeScript browser visualizer. Both implement time-aware A* on a 24 × 14 grid, with three fixed shelf blocks, one planned robot, and two or three other agents represented by perfectly repeating, hand-authored cell routes. The planner allows cardinal moves and waiting, rejects same-cell and head-on edge-swap conflicts, and checks that the destination remains free for one full combined obstacle-route cycle. Scenario metadata and routes are shared through `scenarios.json`.
+The repository combines a Python warehouse-planning CLI and React/TypeScript visualization with a ROS 2 Jazzy workspace that runs two simulated Clearpath Husky A300 robots in Gazebo Harmonic. Each robot uses Nav2; an Open-RMF fleet adapter dispatches tasks and coordinates itineraries across the shared traffic schedule. The browser UI remains a visualization surface, not a robot-control path.
 
-The UI is a local visualization with playback and scenario controls; it has no backend, robot connection, sensor input, localization, mission service, or fleet-management interface. The model has no physical units, vehicle footprint, turning or acceleration limits, braking distance, uncertain obstacle motion, clock synchronization, stale observations, communication failures, doors, charging, or shared-resource reservations. The obstacles are scripted trajectories, not live tracks. These are appropriate simplifications for a teaching demo, but they are not evidence of operational robot safety or production fleet behavior.
+Automated checks include the Python planner and fault-model tests, ROS package tests and workspace builds, Open-RMF asset validation, UI tests/lint/build, and manual headless simulations. The hosted fault-injection suite now covers a Nav2 blocked-aisle detour, observer-side stale `FleetState` detection, and an adapter-level stale-TF task-intake disable/recovery path. The last case injects stale state through an opt-in test topic while DDS TF transport remains active; it is not a network-outage or physical-robot test.
 
-The current CI checks Python unit tests and both CLI scenarios, plus TypeScript tests, lint, and a production UI build. Those checks passed on this checkout during this review. They validate the implemented grid model; they do not validate a physical system.
+The simulation is still non-safety-rated. It does not validate physical braking, safety-rated sensing, real-world localization or dynamics, DDS/network failure behavior, or safe operation around people. Open-RMF task-intake control and Nav2 behavior are software integration evidence only; they do not replace vendor safety functions or a qualified system risk assessment.
 
 ## Proposed target architecture
 
@@ -58,13 +58,13 @@ ISO lists ISO 3691-4:2023 as the published standard for safety requirements and 
 
 ## Phased roadmap
 
-### Phase 0 — Define the product and operating boundary
+### Phase 0 — Define the simulation use case and operating boundary (baseline set)
 
-Decide whether the goal is (a) a polished educational/portfolio simulator, (b) a higher-fidelity digital-twin and fleet-planning tool, or (c) eventual control of a named physical robot fleet. Record the user roles, warehouse tasks, target fleet size, site/map assumptions, robot vendor or generic interface, operating country, and what must happen during a fault. No hardware integration begins in this phase.
+The current baseline is a simulation and visualization system using Clearpath Husky A300 with ROS 2 Jazzy, Gazebo Harmonic, Nav2, and Open-RMF. Physical operation and hardware integration are explicitly out of scope. Before broadening the simulation, specify which warehouse tasks, map assumptions, robot capabilities, and target fleet size its tests should represent; any future hardware proposal would require a separate safety and engineering project.
 
-**Exit criteria:** a short requirements note names the intended product, non-goals, target platform and operating context, critical hazards for professional review, and the functions explicitly excluded from the software safety boundary. The chosen outcome determines whether ROS 2/Nav2 and Open-RMF are appropriate, rather than adopting them by default.
+**Exit criteria:** document the selected simulation scenarios, fleet scale, non-goals, and software safety boundary. This records the scope for simulation development; it does not approve hardware integration or establish a safety case.
 
-### Phase 1 — Build a dependable simulation foundation (recommended next build)
+### Phase 1 — Build a dependable simulation foundation (ongoing hardening)
 
 Separate the simulation domain model from the UI. Add versioned scenario/map validation, explicit simulation time, deterministic seeded runs, a replayable event stream, stable planner and simulator interfaces, and clear units and model assumptions. Resolve the existing Python/TypeScript planner duplication: choose one canonical implementation for shared use, or keep both only with automated differential tests that prove matching results for the same fixtures. Add structured failure states instead of treating every planner failure as an undifferentiated exception.
 
@@ -96,16 +96,15 @@ Do not start this phase merely because simulation gates pass. Select the physica
 
 **Exit criteria:** set by the responsible safety and engineering authorities for the actual machine, installation, use case, and jurisdiction. Software test results alone cannot satisfy this gate. No claim of certification or conformity is made by completing this repository roadmap.
 
-## Decisions needed before implementation
+## Decisions before expanding the simulation scope
 
-1. What are we building first: an educational simulator, a warehouse digital twin, or a path toward a real robot deployment?
-2. Is there a target robot, vendor API, robot footprint, or ROS 2 distribution? If none, should the next phase remain strictly hardware-agnostic?
-3. What matters first: better single-robot motion modeling, multiple-robot scheduling, warehouse tasks, or visual/operational tooling? What fleet size is the first target?
-4. Which country/site and operating conditions should constrain later safety and compliance work? A qualified safety engineer should confirm the applicable requirements.
-5. Should the existing Python and TypeScript planners be consolidated, or should both remain with parity tests?
-6. Is Open-RMF a desired integration target or only an architecture reference to evaluate later?
+1. Which warehouse task types and operating scenarios should the simulation represent first?
+2. What fleet size is the initial scaling target, and which robot capabilities should be modeled?
+3. Should Python and TypeScript planners be consolidated, or retained with automated differential tests?
+4. What map, aisle, station, and shared-resource assumptions should define the next scenario set?
+5. If hardware integration is ever proposed, which jurisdiction and operating conditions would require a separate qualified safety and compliance review?
 
-Until these are answered, the safest productive scope is Phase 1: make the simulator's model, contracts, replay, and tests robust without exposing any physical robot-control path.
+While these details are unresolved, continue improving the current simulation-only baseline and its reproducible tests. Do not infer physical-robot readiness from successful ROS, Nav2, Gazebo, or Open-RMF simulations.
 
 ## References
 
