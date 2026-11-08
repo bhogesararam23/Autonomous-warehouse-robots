@@ -7,8 +7,17 @@ The real headless simulator regression is intentionally separate from push and p
 - **both** (the default): run the single-A300 Nav2 end-to-end smoke and the two-A300 Open-RMF fleet smoke.
 - **nav2**: run only the single-A300 `NavigateToPose` regression.
 - **rmf-fleet**: run only the two-A300 Open-RMF task-dispatch and traffic-scheduling regression.
+- **fault-injection**: run a Nav2 blocked-aisle detour check and an Open-RMF stale-status detection check.
 
 The workflow uses the ROS 2 Jazzy / Ubuntu 24.04 environment, installs the repository's ROS dependencies, builds and tests the workspace, validates the RMF assets, then runs the requested simulation test scripts. It uses software OpenGL rendering because GitHub-hosted runners do not promise a dedicated simulator GPU.
+
+## Fault-injection option
+
+The blocked-aisle case selects a known-free SLAM corridor at least 2 m long and verifies its direct approach before injection. It then spawns a separately validated static box at the corridor midpoint, aligned across the route, and sends the A300 to the already-known-free goal. The smoke requires a post-dispatch global plan whose endpoints match that request and whose points on the start-to-goal segment deviate at least 0.45 m from the direct line. It retains the route points, endpoint errors, final pose, obstacle-spawn response, and contact-sensor evidence. The source Clearpath world and checked-in robot profile are not modified.
+
+The stale-status case first observes both simulated robots, then the smoke-test consumer deliberately discards subsequent `FleetState` entries for one robot. It passes only if the consumer detects that robot's receipt age exceeded 15 seconds before dispatching any task. This is a deterministic observer-side data-loss injection—not a DDS/network outage, an RMF adapter watchdog test, or a claim that the fleet stack itself stops a robot when status is stale. The age uses the local monotonic receipt clock because `FleetState` has no per-robot source timestamp.
+
+Both fault cases run only when `fault-injection` is selected. The workflow requires each expected detection to pass and includes the fault metadata and result JSON in the usual downloadable artifact.
 
 ## Results and artifacts
 

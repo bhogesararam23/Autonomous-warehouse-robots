@@ -82,7 +82,7 @@ The repository also contains a ROS 2 Jazzy Nav2 A* planner plugin for the Clearp
 
 For a repeatable headless `NavigateToPose` run through the custom planner and the standard controller, use [`scripts/test_husky_nav2_e2e.sh`](scripts/test_husky_nav2_e2e.sh); the procedure and its collision-check limits are documented in the simulation guide.
 
-The [manual live-simulation workflow](docs/LIVE_SIMULATION_CI.md) can also run the real Nav2 and two-A300 Open-RMF regressions on demand and preserve their logs and result JSON as downloadable artifacts.
+The [manual live-simulation workflow](docs/LIVE_SIMULATION_CI.md) can run the real Nav2 and two-A300 Open-RMF regressions on demand, or the opt-in blocked-aisle and stale-status fault-injection suite, and preserve logs and result JSON as downloadable artifacts.
 
 ## Open-RMF A300 fleet
 

@@ -11,6 +11,7 @@ on:
           - both
           - nav2
           - rmf-fleet
+          - fault-injection
         default: both
 
 permissions:
@@ -129,6 +130,36 @@ jobs:
           mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
           ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/rmf-fleet-workflow.log"
 
+      - name: Run blocked-aisle Nav2 fault injection
+        id: blocked_aisle
+        if: ${{ success() && inputs.suite == 'fault-injection' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_SMOKE_FAULT: blocked-aisle
+          HUSKY_SMOKE_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/blocked-aisle
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/blocked-aisle/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_SMOKE_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/blocked-aisle-workflow.log"
+
+      - name: Run stale-status Open-RMF fault injection
+        id: stale_status
+        if: ${{ success() && inputs.suite == 'fault-injection' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_RMF_FLEET_FAULT: stale-status
+          HUSKY_RMF_FLEET_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/stale-status
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/stale-status/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/stale-status-workflow.log"
+
       - name: Upload simulation logs, JSON results, and runner diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -147,6 +178,8 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           NAV2_OUTCOME: ${{ steps.nav2.outcome }}
           RMF_OUTCOME: ${{ steps.rmf_fleet.outcome }}
+          BLOCKED_AISLE_OUTCOME: ${{ steps.blocked_aisle.outcome }}
+          STALE_STATUS_OUTCOME: ${{ steps.stale_status.outcome }}
         run: |
           set -euo pipefail
           artifact_root="$RUNNER_TEMP/live-simulation-artifacts"
@@ -169,6 +202,10 @@ jobs:
             else
               echo "| Two-A300 Open-RMF fleet simulation | not requested |"
             fi
+            if [[ "$REQUESTED_SUITE" == fault-injection ]]; then
+              echo "| Nav2 blocked-aisle detour fault | $BLOCKED_AISLE_OUTCOME |"
+              echo "| RMF stale-status detection fault | $STALE_STATUS_OUTCOME |"
+            fi
             echo
             echo "Runner resource and graphics details, simulation logs, and any generated result JSON are attached as the workflow artifact. A failed or timed-out run is not a pass; use the logs and runner diagnostics to distinguish a simulation assertion from hosted-runner resource or graphics limitations. This remains a simulation regression, not a physical-robot safety test."
             echo
@@ -190,6 +227,14 @@ jobs:
           fi
           if [[ ("$REQUESTED_SUITE" == both || "$REQUESTED_SUITE" == rmf-fleet) && "$RMF_OUTCOME" != success ]]; then
             echo "The requested Open-RMF fleet simulation did not pass (outcome: $RMF_OUTCOME)." >&2
+            exit 1
+          fi
+          if [[ "$REQUESTED_SUITE" == fault-injection && "$BLOCKED_AISLE_OUTCOME" != success ]]; then
+            echo "The blocked-aisle Nav2 fault injection did not pass (outcome: $BLOCKED_AISLE_OUTCOME)." >&2
+            exit 1
+          fi
+          if [[ "$REQUESTED_SUITE" == fault-injection && "$STALE_STATUS_OUTCOME" != success ]]; then
+            echo "The stale-status Open-RMF fault injection did not pass (outcome: $STALE_STATUS_OUTCOME)." >&2
             exit 1
           fi
           echo "All requested live simulation regressions passed."
