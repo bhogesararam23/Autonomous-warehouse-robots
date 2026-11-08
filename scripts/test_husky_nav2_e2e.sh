@@ -22,7 +22,8 @@ default_action_timeout=180
 case "$fault_injection" in
   none) ;;
   blocked-aisle)
-    default_action_timeout=420
+    # Hosted software rendering makes the full route-around slower than direct goals.
+    default_action_timeout=600
     smoke_fault_args=(
       --fault-injection blocked-aisle
       --minimum-goal-distance-m 1.8
