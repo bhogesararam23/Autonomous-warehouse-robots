@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 BLOCKED_AISLE_MODEL = "smoke_blocked_aisle_obstacle"
 BLOCKED_AISLE_SIZE = (0.55, 1.20, 1.50)
@@ -24,6 +24,61 @@ BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M = round(
     ),
     2,
 )
+
+
+def find_scan_return(
+    ranges: Sequence[float],
+    *,
+    angle_min_rad: float,
+    angle_increment_rad: float,
+    target_bearing_rad: float,
+    max_angle_error_rad: float,
+    min_range_m: float,
+    max_range_m: float,
+) -> dict[str, float | int] | None:
+    """Find the closest angularly aligned finite scan return within a range window."""
+    parameters = (
+        angle_min_rad,
+        angle_increment_rad,
+        target_bearing_rad,
+        max_angle_error_rad,
+        min_range_m,
+        max_range_m,
+    )
+    if (
+        not all(math.isfinite(value) for value in parameters)
+        or max_angle_error_rad < 0
+        or min_range_m < 0
+        or max_range_m < min_range_m
+    ):
+        return None
+
+    candidates: list[tuple[float, float, int, float]] = []
+    for index, raw_range in enumerate(ranges):
+        measured_range = float(raw_range)
+        if not math.isfinite(measured_range) or not (
+            min_range_m <= measured_range <= max_range_m
+        ):
+            continue
+        beam_angle = angle_min_rad + index * angle_increment_rad
+        angle_error = abs(
+            math.atan2(
+                math.sin(beam_angle - target_bearing_rad),
+                math.cos(beam_angle - target_bearing_rad),
+            )
+        )
+        if angle_error <= max_angle_error_rad:
+            candidates.append((angle_error, measured_range, index, beam_angle))
+
+    if not candidates:
+        return None
+    angle_error, measured_range, index, beam_angle = min(candidates)
+    return {
+        "index": index,
+        "beam_angle_rad": beam_angle,
+        "range_m": measured_range,
+        "angular_error_rad": angle_error,
+    }
 
 
 def blocked_aisle_model_sdf(

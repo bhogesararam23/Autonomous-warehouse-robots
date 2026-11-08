@@ -26,11 +26,14 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.time import Time
 from ros_gz_interfaces.msg import Contacts
+from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
 from fault_injection import (
     BLOCKED_AISLE_MIN_DETOUR_M,
     BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M,
+    BLOCKED_AISLE_SIZE,
     blocked_aisle_model_sdf,
+    find_scan_return,
     max_cross_track_deviation,
     validate_blocked_aisle_model,
     world_has_blocked_aisle,
@@ -68,12 +71,15 @@ class NavigationSmokeNode(Node):
         self.base_frame = base_frame
         self.map_msg: OccupancyGrid | None = None
         self.odom_msg: Odometry | None = None
+        self.scan_msg: LaserScan | None = None
         self.contact_message_counts = [0] * contact_count
         self.contact_messages_total = 0
         self.gazebo_contact_topics_advertised = 0
         self.contact_hits: list[dict[str, Any]] = []
         self.last_map_wall_time: float | None = None
         self.last_odom_wall_time: float | None = None
+        self.last_scan_wall_time: float | None = None
+        self.scan_message_count = 0
         self.last_feedback_wall_time = 0.0
         self.plan_message_count = 0
         self.latest_plan_points: list[tuple[float, float]] = []
@@ -87,6 +93,12 @@ class NavigationSmokeNode(Node):
             Odometry,
             f"{ROBOT_NS}/platform/odom/filtered",
             self._on_odom,
+            10,
+        )
+        self.scan_subscription = self.create_subscription(
+            LaserScan,
+            f"{ROBOT_NS}/sensors/lidar2d_0/scan",
+            self._on_scan,
             10,
         )
         self.plan_subscription = self.create_subscription(
@@ -118,6 +130,11 @@ class NavigationSmokeNode(Node):
     def _on_odom(self, message: Odometry) -> None:
         self.odom_msg = message
         self.last_odom_wall_time = time.monotonic()
+
+    def _on_scan(self, message: LaserScan) -> None:
+        self.scan_msg = message
+        self.last_scan_wall_time = time.monotonic()
+        self.scan_message_count += 1
 
     def _on_plan(self, message: NavPath) -> None:
         self.plan_message_count += 1
@@ -349,6 +366,64 @@ class NavigationSmokeNode(Node):
                     return True
         return False
 
+    def blocked_aisle_lidar_evidence(
+        self,
+        obstacle_center_map: tuple[float, float],
+    ) -> dict[str, Any] | None:
+        if (
+            self.scan_msg is None
+            or self.last_scan_wall_time is None
+            or not self.scan_msg.header.frame_id
+        ):
+            return None
+        scan = self.scan_msg
+        try:
+            scan_from_map = self.tf_buffer.lookup_transform(
+                scan.header.frame_id, "map", Time()
+            )
+        except TransformException:
+            return None
+        transform = scan_from_map.transform
+        scan_yaw = yaw_from_quaternion(transform.rotation)
+        center_scan_x = (
+            math.cos(scan_yaw) * obstacle_center_map[0]
+            - math.sin(scan_yaw) * obstacle_center_map[1]
+            + transform.translation.x
+        )
+        center_scan_y = (
+            math.sin(scan_yaw) * obstacle_center_map[0]
+            + math.cos(scan_yaw) * obstacle_center_map[1]
+            + transform.translation.y
+        )
+        center_distance = math.hypot(center_scan_x, center_scan_y)
+        target_bearing = math.atan2(center_scan_y, center_scan_x)
+        max_expected_range = min(
+            float(scan.range_max),
+            center_distance - BLOCKED_AISLE_SIZE[0] / 2.0 + 0.20,
+        )
+        evidence = find_scan_return(
+            scan.ranges,
+            angle_min_rad=float(scan.angle_min),
+            angle_increment_rad=float(scan.angle_increment),
+            target_bearing_rad=target_bearing,
+            max_angle_error_rad=0.08,
+            min_range_m=float(scan.range_min),
+            max_range_m=max_expected_range,
+        )
+        if evidence is None:
+            return None
+        return {
+            **evidence,
+            "topic": f"{ROBOT_NS}/sensors/lidar2d_0/scan",
+            "frame_id": scan.header.frame_id,
+            "scan_stamp_ns": int(scan.header.stamp.sec) * 1_000_000_000
+            + int(scan.header.stamp.nanosec),
+            "scan_age_seconds": max(0.0, time.monotonic() - self.last_scan_wall_time),
+            "target_bearing_rad": target_bearing,
+            "distance_to_obstacle_center_m": center_distance,
+            "expected_front_face_range_max_m": max_expected_range,
+        }
+
     def select_goal_pose(
         self,
         start_pose: tuple[float, float, float],
@@ -505,47 +580,113 @@ def spawn_blocked_aisle(
             json.dumps(complete_manifest, indent=2) + "\n", encoding="utf-8"
         )
 
-    spawn_time = time.monotonic()
+    scan_count_before_spawn = node.scan_message_count
+    spawn_command = [
+        "ros2",
+        "run",
+        "ros_gz_sim",
+        "create",
+        "-world",
+        "warehouse",
+        "-file",
+        str(args.fault_model_file),
+    ]
     completed = subprocess.run(
-        [
-            "ros2",
-            "run",
-            "ros_gz_sim",
-            "create",
-            "-world",
-            "warehouse",
-            "-file",
-            str(args.fault_model_file),
-        ],
+        spawn_command,
         capture_output=True,
         text=True,
         timeout=25.0,
         check=False,
     )
     response = (completed.stdout + completed.stderr).strip()
+    spawn_time = time.monotonic()
+    spawn_sim_time_ns = int(node.get_clock().now().nanoseconds)
+    spawn_evidence: dict[str, Any] = {
+        "spawn_command": "ros2 run ros_gz_sim create -world warehouse -file <validated model>",
+        "spawn_response": response[-1200:],
+        "spawn_exit_code": completed.returncode,
+        "map_center_xy_m": list(center_map),
+        "world_center_xy_m": [center_world_x, center_world_y],
+        "world_orientation_yaw_rad": world_yaw,
+        "model_sha256": model_digest,
+        "scan_messages_before_spawn": scan_count_before_spawn,
+        "spawn_sim_time_ns": spawn_sim_time_ns,
+    }
+    args.failure_evidence["obstacle_spawn"] = spawn_evidence
     if completed.returncode != 0:
         raise SmokeTestError(
             "Gazebo failed to spawn the blocked-aisle model: "
             f"exit={completed.returncode}; response={response[-1200:]}"
         )
 
-    node.wait_until(
-        "SLAM occupancy evidence of the spawned aisle obstacle",
-        lambda: node.last_map_wall_time is not None
+    def obstacle_return_observed() -> bool:
+        if (
+            node.last_scan_wall_time is None
+            or node.last_scan_wall_time < spawn_time
+            or node.scan_message_count <= scan_count_before_spawn
+            or node.scan_msg is None
+            or int(node.scan_msg.header.stamp.sec) * 1_000_000_000
+            + int(node.scan_msg.header.stamp.nanosec)
+            < spawn_sim_time_ns
+        ):
+            return False
+        lidar_evidence = node.blocked_aisle_lidar_evidence(center_map)
+        if lidar_evidence is None:
+            return False
+        spawn_evidence["lidar_obstacle_evidence"] = lidar_evidence
+        return True
+
+    try:
+        node.wait_until(
+            "a fresh lidar return from the spawned aisle obstacle",
+            obstacle_return_observed,
+            15.0,
+        )
+    except SmokeTestError as error:
+        spawn_evidence["scan_messages_after_spawn"] = (
+            node.scan_message_count - scan_count_before_spawn
+        )
+        raise SmokeTestError(
+            f"{error}; Gazebo create response={response[-1000:]}"
+        ) from error
+
+    costmap_refresh_deadline = time.monotonic() + 2.0
+    while time.monotonic() < costmap_refresh_deadline:
+        rclpy.spin_once(node, timeout_sec=0.1)
+    lidar_evidence = node.blocked_aisle_lidar_evidence(center_map)
+    if lidar_evidence is None:
+        raise SmokeTestError(
+            "The obstacle's post-spawn lidar return disappeared before Nav2 costmap refresh"
+        )
+    slam_map_observed = (
+        node.last_map_wall_time is not None
         and node.last_map_wall_time >= spawn_time
         and node.map_contains_occupied_near(
             center_map[0], center_map[1], radius=0.40, max_occupancy=args.max_occupancy
-        ),
-        25.0,
+        )
     )
-    return {
-        "spawn_command": "ros2 run ros_gz_sim create -world warehouse -file <validated model>",
-        "spawn_response": response[-1200:],
-        "map_center_xy_m": list(center_map),
-        "world_center_xy_m": [center_world_x, center_world_y],
-        "world_orientation_yaw_rad": world_yaw,
-        "occupied_map_evidence": True,
-    }
+    spawn_evidence.update(
+        {
+            "lidar_obstacle_evidence": lidar_evidence,
+            "scan_messages_after_spawn": node.scan_message_count - scan_count_before_spawn,
+            "slam_map_occupied_near_obstacle": slam_map_observed,
+            "nav2_costmap_refresh_wait_seconds": 2.0,
+        }
+    )
+    fault_manifest["lidar_obstacle_evidence"] = lidar_evidence
+    fault_manifest["slam_map_occupied_near_obstacle"] = slam_map_observed
+    if args.fault_manifest is not None:
+        complete_manifest = json.loads(args.fault_manifest.read_text(encoding="utf-8"))
+        complete_manifest["fault_injection"] = fault_manifest
+        args.fault_manifest.write_text(
+            json.dumps(complete_manifest, indent=2) + "\n", encoding="utf-8"
+        )
+    print(
+        "Verified fresh lidar return from spawned aisle obstacle; "
+        f"SLAM occupancy observed={slam_map_observed}.",
+        flush=True,
+    )
+    return spawn_evidence
 
 
 def dispatch_navigation_goal(
@@ -679,6 +820,14 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
     try:
         node.wait_for_clock(args.startup_timeout)
         node.wait_for_robot_state(args.startup_timeout)
+        if args.fault_injection == "blocked-aisle":
+            node.wait_until(
+                "A300 lidar scan stream",
+                lambda: node.scan_msg is not None
+                and node.last_scan_wall_time is not None
+                and time.monotonic() - node.last_scan_wall_time < 3.0,
+                args.startup_timeout,
+            )
         node.wait_for_contact_instrumentation(args.startup_timeout)
         plugins = node.verify_nav2_plugins(args.startup_timeout)
 
