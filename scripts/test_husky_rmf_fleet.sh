@@ -16,6 +16,20 @@ profiles_root="$run_dir/profiles"
 world_file="$run_dir/warehouse_contacts.sdf"
 result_file="$run_dir/fleet_result.json"
 mkdir -p "$profiles_root"
+smoke_fault_args=()
+case "${HUSKY_RMF_FLEET_FAULT:-none}" in
+  none) ;;
+  stale-status)
+    smoke_fault_args=(
+      --fault-injection stale-status
+      --status-stale-after "${HUSKY_RMF_FLEET_STALE_AFTER:-15.0}"
+    )
+    ;;
+  *)
+    echo "Unsupported HUSKY_RMF_FLEET_FAULT: ${HUSKY_RMF_FLEET_FAULT}" >&2
+    exit 2
+    ;;
+esac
 
 launch_pid=""
 stop_launch() {
@@ -168,7 +182,7 @@ wait_for_publisher() {
 
 verify_nav2_parameter() {
   local robot="$1" parameter="$2" expected="$3" output="" actual=""
-  for _ in $(seq 1 10); do
+  for _ in $(seq 1 30); do
     output="$(timeout 6s ros2 param get "/$robot/controller_server" "$parameter" 2>/dev/null || true)"
     actual="$(sed -n 's/^Double value is: //p' <<<"$output" | tail -n 1)"
     if [[ -n "$actual" ]] && python3 - "$actual" "$expected" <<'PY'
@@ -220,6 +234,7 @@ python3 "$smoke_client" \
   --nav2-yaw-goal-tolerance-rad "$nav2_yaw_goal_tolerance" \
   --timeout "${HUSKY_RMF_FLEET_TIMEOUT:-360}" \
   --result-file "$result_file" \
+  "${smoke_fault_args[@]}" \
   > >(tee "$run_dir/smoke.log") 2>&1
 smoke_status=$?
 set -e

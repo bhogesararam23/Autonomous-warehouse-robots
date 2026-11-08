@@ -24,6 +24,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from ros_gz_interfaces.msg import Contacts
 from warehouse_rmf_fleet.coordinate_transform import rmf_to_local
+from warehouse_rmf_fleet.fleet_status_freshness import stale_status_ages
 
 FLEET = "warehouse_a300_fleet"
 ROBOTS = ("a300_00000", "a300_00001")
@@ -137,7 +138,9 @@ def _minimum_simultaneous_distance(
 
 
 class FleetSmokeNode(Node):
-    def __init__(self, contact_count: int, use_sim_time: bool = True) -> None:
+    def __init__(
+        self, contact_count: int, status_stale_after: float, use_sim_time: bool = True
+    ) -> None:
         super().__init__(
             "a300_rmf_fleet_smoke",
             parameter_overrides=[Parameter("use_sim_time", value=use_sim_time)],
@@ -153,6 +156,10 @@ class FleetSmokeNode(Node):
         self.dispatches: dict[str, dict[str, Any]] = {}
         self.request_ids: dict[str, str] = {}
         self.fleet_states: dict[str, Any] = {}
+        self.fleet_state_wall_times: dict[str, float] = {}
+        self.status_stale_after = status_stale_after
+        self.stale_injection_robot: str | None = None
+        self.stale_injection_drops: dict[str, int] = {robot: 0 for robot in ROBOTS}
         self.maps: dict[str, OccupancyGrid] = {}
         self.map_wall_times: dict[str, float] = {}
         self.initial_map_checks: dict[str, dict[str, Any]] = {}
@@ -232,7 +239,19 @@ class FleetSmokeNode(Node):
 
     def _on_fleet_state(self, message: FleetState) -> None:
         for robot in message.robots:
-            self.fleet_states[robot.name] = robot
+            name = str(robot.name)
+            if name == self.stale_injection_robot and name in self.fleet_states:
+                self.stale_injection_drops[name] += 1
+                continue
+            self.fleet_states[name] = robot
+            self.fleet_state_wall_times[name] = time.monotonic()
+
+    def stale_fleet_statuses(self, now: float | None = None) -> dict[str, float]:
+        return stale_status_ages(
+            self.fleet_state_wall_times,
+            now=time.monotonic() if now is None else now,
+            max_age_seconds=self.status_stale_after,
+        )
 
     def _on_map(self, robot: str, message: OccupancyGrid) -> None:
         self.maps[robot] = message
@@ -312,10 +331,24 @@ class FleetSmokeNode(Node):
         text = collision_name.lower()
         return any(token in text for token in ("ground_plane", "floor"))
 
-    def spin_until(self, description: str, predicate, timeout: float) -> None:
+    def spin_until(
+        self,
+        description: str,
+        predicate,
+        timeout: float,
+        *,
+        require_fresh_status: bool = False,
+    ) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.1)
+            if require_fresh_status:
+                stale = self.stale_fleet_statuses()
+                if stale:
+                    ages = {robot: round(age, 3) for robot, age in stale.items()}
+                    raise FleetSmokeError(
+                        f"RMF robot status became stale (age seconds): {ages}"
+                    )
             if predicate():
                 return
         raise FleetSmokeError(f"Timed out waiting for {description} after {timeout:.0f}s")
@@ -621,6 +654,14 @@ class FleetSmokeNode(Node):
         return {
             "status": "passed",
             "simulation": "Gazebo Harmonic headless; Clearpath Husky A300 warehouse world",
+            "fleet_status_freshness": {
+                "clock": "local monotonic receipt time; FleetState has no per-robot source timestamp",
+                "maximum_age_seconds": self.status_stale_after,
+                "last_update_age_seconds": {
+                    robot: round(time.monotonic() - self.fleet_state_wall_times[robot], 3)
+                    for robot in ROBOTS
+                },
+            },
             "navigation_completion_criteria": {
                 "nav2_goal_checker_plugin": "nav2_controller::SimpleGoalChecker",
                 "nav2_xy_goal_tolerance_m": NAV2_GOAL_XY_TOLERANCE_M,
@@ -674,10 +715,17 @@ def main() -> int:
     parser.add_argument("--nav2-xy-goal-tolerance-m", type=float, default=NAV2_GOAL_XY_TOLERANCE_M)
     parser.add_argument("--nav2-yaw-goal-tolerance-rad", type=float, default=NAV2_GOAL_YAW_TOLERANCE_RAD)
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument("--status-stale-after", type=float, default=15.0)
+    parser.add_argument("--status-fault-timeout", type=float, default=35.0)
+    parser.add_argument(
+        "--fault-injection", choices=("none", "stale-status"), default="none"
+    )
     parser.add_argument("--result-file", type=Path, required=True)
     args = parser.parse_args()
     if args.contact_count < 1:
         parser.error("--contact-count must be positive")
+    if args.status_stale_after <= 0.0 or args.status_fault_timeout <= args.status_stale_after:
+        parser.error("status fault timeout must exceed a positive status stale threshold")
     if (
         args.nav2_xy_goal_tolerance_m <= 0.0
         or args.nav2_yaw_goal_tolerance_rad <= 0.0
@@ -692,7 +740,7 @@ def main() -> int:
         parser.error("runtime Nav2 goal-checker parameters do not match the smoke configuration")
 
     rclpy.init(args=sys.argv)
-    node = FleetSmokeNode(args.contact_count)
+    node = FleetSmokeNode(args.contact_count, args.status_stale_after)
     try:
         node.spin_until("non-zero Gazebo clock", lambda: node.get_clock().now().nanoseconds > 0, 60.0)
         node.verify_contact_publishers(60.0)
@@ -716,6 +764,7 @@ def main() -> int:
             lambda: set(ROBOTS).issubset(node.maps)
             and all(time.monotonic() - node.map_wall_times[robot] < 5.0 for robot in ROBOTS),
             60.0,
+            require_fresh_status=True,
         )
         start_poses = {}
         for robot in ROBOTS:
@@ -731,6 +780,41 @@ def main() -> int:
                     f"(level={state.location.level_name}, xy_error={error:.3f}m, "
                     f"yaw_error={yaw_error:.3f}rad; expected_yaw={START_YAWS[robot]:.3f}rad)"
                 )
+        if args.fault_injection == "stale-status":
+            injected_robot = ROBOTS[0]
+            node.stale_injection_robot = injected_robot
+            print(
+                f"Injecting observer-side status loss for {injected_robot}; "
+                "new FleetState entries for that robot will be discarded.",
+                flush=True,
+            )
+            node.spin_until(
+                f"stale status detection for {injected_robot}",
+                lambda: injected_robot in node.stale_fleet_statuses(),
+                args.status_fault_timeout,
+            )
+            stale_age = node.stale_fleet_statuses()[injected_robot]
+            if node.stale_injection_drops[injected_robot] < 1:
+                raise FleetSmokeError("Stale status injection did not suppress any FleetState updates")
+            fault_result = {
+                "status": "passed",
+                "simulation": "Gazebo Harmonic headless; Clearpath Husky A300 warehouse world",
+                "fault_injection": {
+                    "scenario": "stale-status",
+                    "injection_boundary": "RMF smoke-test consumer discards updates for one robot after its initial status",
+                    "robot": injected_robot,
+                    "stale_threshold_seconds": args.status_stale_after,
+                    "detected_status_age_seconds": round(stale_age, 3),
+                    "discarded_updates": node.stale_injection_drops[injected_robot],
+                    "result": "stale robot status detected before any task was dispatched",
+                    "limitation": "This deterministically tests consumer-side stale detection; it does not simulate a DDS/network outage or claim an RMF adapter watchdog.",
+                },
+            }
+            args.result_file.parent.mkdir(parents=True, exist_ok=True)
+            args.result_file.write_text(json.dumps(fault_result, indent=2) + "\n", encoding="utf-8")
+            print(json.dumps(fault_result, indent=2))
+            print(f"PASS: stale FleetState was detected before dispatch. Evidence: {args.result_file}")
+            return 0
         node.check_initial_map_routes(start_poses)
         if node.contact_hits:
             raise FleetSmokeError("Non-floor contact observed before task dispatch: " + json.dumps(node.contact_hits[:4]))
@@ -744,6 +828,7 @@ def main() -> int:
                 for request_id in request_ids.values()
             ),
             20.0,
+            require_fresh_status=True,
         )
         failed_responses = {
             goal: node.responses[request_id]
@@ -788,6 +873,7 @@ def main() -> int:
             "the two fleet-dispatched goals to finish on distinct A300s",
             all_goals_reached_by_distinct_robots,
             args.timeout,
+            require_fresh_status=True,
         )
         time.sleep(1.0)
         for _ in range(10):
@@ -869,6 +955,14 @@ def main() -> int:
         failure = {
             "status": "failed",
             "reason": str(error),
+            "fleet_status_freshness": {
+                "maximum_age_seconds": node.status_stale_after,
+                "stale_age_seconds": {
+                    robot: round(age, 3)
+                    for robot, age in node.stale_fleet_statuses().items()
+                },
+                "injected_discarded_updates": node.stale_injection_drops,
+            },
             "task_request_ids": node.request_ids,
             "observed_robots": observed_robots,
             "dispatch_states": node.dispatches,
