@@ -80,6 +80,7 @@ class NavigationSmokeNode(Node):
         self.last_odom_wall_time: float | None = None
         self.last_scan_wall_time: float | None = None
         self.scan_message_count = 0
+        self.last_lidar_probe: dict[str, Any] | None = None
         self.last_feedback_wall_time = 0.0
         self.plan_message_count = 0
         self.latest_plan_points: list[tuple[float, float]] = []
@@ -370,18 +371,37 @@ class NavigationSmokeNode(Node):
         self,
         obstacle_center_map: tuple[float, float],
     ) -> dict[str, Any] | None:
-        if (
-            self.scan_msg is None
-            or self.last_scan_wall_time is None
-            or not self.scan_msg.header.frame_id
-        ):
+        if self.scan_msg is None or self.last_scan_wall_time is None:
+            self.last_lidar_probe = {"reason": "no LaserScan received"}
             return None
         scan = self.scan_msg
+        scan_stamp_ns = int(scan.header.stamp.sec) * 1_000_000_000 + int(
+            scan.header.stamp.nanosec
+        )
+        diagnostic: dict[str, Any] = {
+            "topic": f"{ROBOT_NS}/sensors/lidar2d_0/scan",
+            "frame_id": scan.header.frame_id,
+            "scan_stamp_ns": scan_stamp_ns,
+            "scan_age_seconds": max(
+                0.0, time.monotonic() - self.last_scan_wall_time
+            ),
+            "range_min_m": float(scan.range_min),
+            "range_max_m": float(scan.range_max),
+            "angle_min_rad": float(scan.angle_min),
+            "angle_increment_rad": float(scan.angle_increment),
+        }
+        if not scan.header.frame_id:
+            diagnostic["reason"] = "LaserScan header frame_id is empty"
+            self.last_lidar_probe = diagnostic
+            return None
         try:
             scan_from_map = self.tf_buffer.lookup_transform(
                 scan.header.frame_id, "map", Time()
             )
-        except TransformException:
+        except TransformException as error:
+            diagnostic["reason"] = "TF transform from map to LaserScan frame unavailable"
+            diagnostic["transform_error"] = str(error)
+            self.last_lidar_probe = diagnostic
             return None
         transform = scan_from_map.transform
         scan_yaw = yaw_from_quaternion(transform.rotation)
@@ -401,27 +421,42 @@ class NavigationSmokeNode(Node):
             float(scan.range_max),
             center_distance - BLOCKED_AISLE_SIZE[0] / 2.0 + 0.20,
         )
-        evidence = find_scan_return(
+        scan_search = {
+            "angle_min_rad": float(scan.angle_min),
+            "angle_increment_rad": float(scan.angle_increment),
+            "target_bearing_rad": target_bearing,
+            "max_angle_error_rad": 0.08,
+            "min_range_m": float(scan.range_min),
+        }
+        bearing_return = find_scan_return(
             scan.ranges,
-            angle_min_rad=float(scan.angle_min),
-            angle_increment_rad=float(scan.angle_increment),
-            target_bearing_rad=target_bearing,
-            max_angle_error_rad=0.08,
-            min_range_m=float(scan.range_min),
-            max_range_m=max_expected_range,
+            **scan_search,
+            max_range_m=float(scan.range_max),
         )
+        diagnostic.update(
+            {
+                "target_center_scan_xy_m": [center_scan_x, center_scan_y],
+                "scan_from_map_translation_xy_m": [
+                    transform.translation.x,
+                    transform.translation.y,
+                ],
+                "scan_from_map_yaw_rad": scan_yaw,
+                "target_bearing_rad": target_bearing,
+                "distance_to_obstacle_center_m": center_distance,
+                "expected_front_face_range_max_m": max_expected_range,
+                "closest_return_in_target_bearing": bearing_return,
+            }
+        )
+        evidence = find_scan_return(
+            scan.ranges, **scan_search, max_range_m=max_expected_range
+        )
+        diagnostic["expected_range_match"] = evidence is not None
+        self.last_lidar_probe = diagnostic
         if evidence is None:
             return None
         return {
+            **diagnostic,
             **evidence,
-            "topic": f"{ROBOT_NS}/sensors/lidar2d_0/scan",
-            "frame_id": scan.header.frame_id,
-            "scan_stamp_ns": int(scan.header.stamp.sec) * 1_000_000_000
-            + int(scan.header.stamp.nanosec),
-            "scan_age_seconds": max(0.0, time.monotonic() - self.last_scan_wall_time),
-            "target_bearing_rad": target_bearing,
-            "distance_to_obstacle_center_m": center_distance,
-            "expected_front_face_range_max_m": max_expected_range,
         }
 
     def select_goal_pose(
@@ -629,6 +664,19 @@ def spawn_blocked_aisle(
             + int(node.scan_msg.header.stamp.nanosec)
             < spawn_sim_time_ns
         ):
+            node.last_lidar_probe = {
+                "reason": "no post-spawn LaserScan at or after Gazebo simulation time",
+                "scan_messages_after_spawn": (
+                    node.scan_message_count - scan_count_before_spawn
+                ),
+                "scan_stamp_ns": (
+                    int(node.scan_msg.header.stamp.sec) * 1_000_000_000
+                    + int(node.scan_msg.header.stamp.nanosec)
+                    if node.scan_msg is not None
+                    else None
+                ),
+                "spawn_sim_time_ns": spawn_sim_time_ns,
+            }
             return False
         lidar_evidence = node.blocked_aisle_lidar_evidence(center_map)
         if lidar_evidence is None:
@@ -646,8 +694,10 @@ def spawn_blocked_aisle(
         spawn_evidence["scan_messages_after_spawn"] = (
             node.scan_message_count - scan_count_before_spawn
         )
+        spawn_evidence["latest_lidar_probe"] = node.last_lidar_probe
         raise SmokeTestError(
-            f"{error}; Gazebo create response={response[-1000:]}"
+            f"{error}; Gazebo create response={response[-1000:]}; "
+            f"latest lidar probe={json.dumps(node.last_lidar_probe, sort_keys=True)[:1400]}"
         ) from error
 
     costmap_refresh_deadline = time.monotonic() + 2.0
