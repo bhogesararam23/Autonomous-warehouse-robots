@@ -188,6 +188,7 @@ def main() -> int:
                     "model",
                     "size_xyz_m",
                     "static",
+                    "minimum_route_distance_m",
                     "minimum_planner_cross_track_deviation_m",
                 )
             }

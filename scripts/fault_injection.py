@@ -11,6 +11,19 @@ BLOCKED_AISLE_SIZE = (0.55, 1.20, 1.50)
 BLOCKED_AISLE_POSE_Z = BLOCKED_AISLE_SIZE[2] / 2.0
 BLOCKED_AISLE_MIN_DETOUR_M = 0.45
 DEFAULT_BLOCKED_AISLE_CENTER = (1.0, 0.0)
+# The A300 Nav2 footprint extends 0.495 m forward/back; preserve another 0.13 m
+# beyond the obstacle's 0.275 m half-length on both ends of the selected route.
+A300_HALF_LENGTH_M = 0.495
+BLOCKED_AISLE_ENDPOINT_BODY_GAP_M = 0.13
+BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M = round(
+    2.0
+    * (
+        A300_HALF_LENGTH_M
+        + BLOCKED_AISLE_SIZE[0] / 2.0
+        + BLOCKED_AISLE_ENDPOINT_BODY_GAP_M
+    ),
+    2,
+)
 
 
 def blocked_aisle_model_sdf(
@@ -50,6 +63,7 @@ def blocked_aisle_metadata(
         "orientation_yaw_rad": float(yaw_rad),
         "size_xyz_m": list(BLOCKED_AISLE_SIZE),
         "static": True,
+        "minimum_route_distance_m": BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M,
         "minimum_planner_cross_track_deviation_m": BLOCKED_AISLE_MIN_DETOUR_M,
     }
 

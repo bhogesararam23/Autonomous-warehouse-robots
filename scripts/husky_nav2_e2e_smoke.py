@@ -29,6 +29,7 @@ from ros_gz_interfaces.msg import Contacts
 from tf2_ros import Buffer, TransformException, TransformListener
 from fault_injection import (
     BLOCKED_AISLE_MIN_DETOUR_M,
+    BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M,
     blocked_aisle_model_sdf,
     max_cross_track_deviation,
     validate_blocked_aisle_model,
@@ -474,8 +475,11 @@ def spawn_blocked_aisle(
     dx = goal_xy[0] - initial_pose[0]
     dy = goal_xy[1] - initial_pose[1]
     distance = math.hypot(dx, dy)
-    if distance < 2.0:
-        raise SmokeTestError("Blocked-aisle fault needs at least 2.0 m of known-free route")
+    if distance < BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M:
+        raise SmokeTestError(
+            "Blocked-aisle fault needs at least "
+            f"{BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M:.2f} m of known-free route"
+        )
     center_map = ((initial_pose[0] + goal_xy[0]) / 2.0, (initial_pose[1] + goal_xy[1]) / 2.0)
     map_heading = math.atan2(dy, dx)
     center_world_x, center_world_y, map_to_odom_yaw = node.map_point_in_odom(*center_map)
@@ -574,6 +578,7 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
             "model",
             "size_xyz_m",
             "static",
+            "minimum_route_distance_m",
             "minimum_planner_cross_track_deviation_m",
         ):
             value = model_metadata[key]
@@ -589,6 +594,10 @@ def run_test(args: argparse.Namespace) -> dict[str, Any]:
             raise SmokeTestError("Fault manifest points to a different obstacle model file")
         if fault_manifest.get("injection_timing") != "after-known-free-map-preflight":
             raise SmokeTestError("Fault manifest does not record post-map obstacle injection")
+        if args.minimum_goal_distance_m < BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M:
+            raise SmokeTestError(
+                "minimum-goal-distance-m is below the footprint-derived blocked-aisle minimum"
+            )
 
     rclpy.init()
     node = NavigationSmokeNode(args.contact_count, args.base_frame)

@@ -23,7 +23,7 @@ case "$fault_injection" in
   blocked-aisle)
     smoke_fault_args=(
       --fault-injection blocked-aisle
-      --minimum-goal-distance-m 2.0
+      --minimum-goal-distance-m 1.8
     )
     smoke_fault_model_args=(--fault-model-file "$fault_model")
     ;;

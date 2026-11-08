@@ -26,6 +26,7 @@ class FaultInjectionTest(unittest.TestCase):
         self.assertIsNotNone(model)
         self.assertEqual(metadata["scenario"], "blocked-aisle")
         self.assertEqual(metadata["center_xy_m"], [1.0, 0.0])
+        self.assertEqual(metadata["minimum_route_distance_m"], 1.8)
         self.assertEqual(model.findtext("static"), "true")
         self.assertEqual(
             model.findtext("link/collision/geometry/box/size"), "0.550 1.200 1.500"
