@@ -242,5 +242,9 @@ if [[ "$smoke_status" -ne 0 ]]; then
   exit "$smoke_status"
 fi
 
-echo "PASS: Open-RMF dispatched both simulated A300s through the shared schedule."
+if [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == stale-status ]]; then
+  echo "PASS: injected stale FleetState was detected before task dispatch."
+else
+  echo "PASS: Open-RMF dispatched both simulated A300s through the shared schedule."
+fi
 echo "Structured evidence: $result_file"
