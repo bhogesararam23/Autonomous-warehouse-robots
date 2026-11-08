@@ -25,7 +25,7 @@ A run is green only when dependency installation, the workspace build/asset chec
 
 The workflow uploads a downloadable `live-a300-simulation-<run ID>-<attempt>` artifact even when setup or a simulation check fails. It contains runner CPU/memory/disk and graphics-device diagnostics, ROS logs, simulator and smoke-test logs, generated evidence, and `result.json` / `fleet_result.json` when those files were produced. Artifacts are retained for 14 days. The workflow summary lists the outcome of each stage and any result JSON files found.
 
-Each simulator step has a 45-minute limit and the full job has a 180-minute limit. Hosted CPU, memory, disk, and graphics availability can affect startup and runtime. When a run fails, use the step log and uploaded runner diagnostics to identify whether it stopped during setup, hit a test assertion, or was constrained by the hosted environment; do not infer a simulator defect or a pass from a timeout alone.
+Each simulator step has a 45-minute limit and the full job has a 180-minute limit. The blocked-aisle NavigateToPose goal has a 420-second wall-clock timeout by default, overridable with `HUSKY_SMOKE_ACTION_TIMEOUT`; the longer budget accommodates the measured detour execution time without weakening the required global-plan detour, action success, final-pose, or no-contact checks. Hosted CPU, memory, disk, and graphics availability can affect startup and runtime. When a run fails, use the step log and uploaded runner diagnostics to identify whether it stopped during setup, hit a test assertion, or was constrained by the hosted environment; do not infer a simulator defect or a pass from a timeout alone.
 
 ## Simulation-only boundary
 

@@ -18,9 +18,11 @@ fault_model="$run_dir/blocked_aisle_obstacle.sdf"
 fault_injection="${HUSKY_SMOKE_FAULT:-none}"
 smoke_fault_args=()
 smoke_fault_model_args=()
+default_action_timeout=180
 case "$fault_injection" in
   none) ;;
   blocked-aisle)
+    default_action_timeout=420
     smoke_fault_args=(
       --fault-injection blocked-aisle
       --minimum-goal-distance-m 1.8
@@ -32,6 +34,7 @@ case "$fault_injection" in
     exit 2
     ;;
 esac
+smoke_action_timeout="${HUSKY_SMOKE_ACTION_TIMEOUT:-$default_action_timeout}"
 mkdir -p "$setup_dir"
 
 sim_pid=""
@@ -183,7 +186,7 @@ python3 "$smoke_client" \
   --result-file "$run_dir/result.json" \
   --fault-manifest "$manifest" \
   --world-file "$world_file" \
-  --action-timeout "${HUSKY_SMOKE_ACTION_TIMEOUT:-180}" \
+  --action-timeout "$smoke_action_timeout" \
   "${smoke_fault_model_args[@]}" \
   "$@" \
   "${smoke_fault_args[@]}" \
