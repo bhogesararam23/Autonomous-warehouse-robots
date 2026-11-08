@@ -160,6 +160,21 @@ jobs:
           mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
           ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/stale-status-workflow.log"
 
+      - name: Run stale-TF Open-RMF task-intake fault injection
+        id: stale_tf
+        if: ${{ success() && inputs.suite == 'fault-injection' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_RMF_FLEET_FAULT: stale-tf
+          HUSKY_RMF_FLEET_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/stale-tf
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/stale-tf/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/stale-tf-workflow.log"
+
       - name: Upload simulation logs, JSON results, and runner diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -180,6 +195,7 @@ jobs:
           RMF_OUTCOME: ${{ steps.rmf_fleet.outcome }}
           BLOCKED_AISLE_OUTCOME: ${{ steps.blocked_aisle.outcome }}
           STALE_STATUS_OUTCOME: ${{ steps.stale_status.outcome }}
+          STALE_TF_OUTCOME: ${{ steps.stale_tf.outcome }}
         run: |
           set -euo pipefail
           artifact_root="$RUNNER_TEMP/live-simulation-artifacts"
@@ -205,6 +221,7 @@ jobs:
             if [[ "$REQUESTED_SUITE" == fault-injection ]]; then
               echo "| Nav2 blocked-aisle detour fault | $BLOCKED_AISLE_OUTCOME |"
               echo "| RMF stale-status detection fault | $STALE_STATUS_OUTCOME |"
+              echo "| RMF stale-TF task-intake and recovery fault | $STALE_TF_OUTCOME |"
             fi
             echo
             echo "Runner resource and graphics details, simulation logs, and any generated result JSON are attached as the workflow artifact. A failed or timed-out run is not a pass; use the logs and runner diagnostics to distinguish a simulation assertion from hosted-runner resource or graphics limitations. This remains a simulation regression, not a physical-robot safety test."
@@ -235,6 +252,10 @@ jobs:
           fi
           if [[ "$REQUESTED_SUITE" == fault-injection && "$STALE_STATUS_OUTCOME" != success ]]; then
             echo "The stale-status Open-RMF fault injection did not pass (outcome: $STALE_STATUS_OUTCOME)." >&2
+            exit 1
+          fi
+          if [[ "$REQUESTED_SUITE" == fault-injection && "$STALE_TF_OUTCOME" != success ]]; then
+            echo "The stale-TF Open-RMF task-intake fault injection did not pass (outcome: $STALE_TF_OUTCOME)." >&2
             exit 1
           fi
           echo "All requested live simulation regressions passed."

@@ -7,7 +7,7 @@ The real headless simulator regression is intentionally separate from push and p
 - **both** (the default): run the single-A300 Nav2 end-to-end smoke and the two-A300 Open-RMF fleet smoke.
 - **nav2**: run only the single-A300 `NavigateToPose` regression.
 - **rmf-fleet**: run only the two-A300 Open-RMF task-dispatch and traffic-scheduling regression.
-- **fault-injection**: run a Nav2 blocked-aisle detour check and an Open-RMF stale-status detection check.
+- **fault-injection**: run a Nav2 blocked-aisle detour check, an observer-side stale-status check, and an adapter-level stale-TF task-intake/recovery check.
 
 The workflow uses the ROS 2 Jazzy / Ubuntu 24.04 environment, installs the repository's ROS dependencies, builds and tests the workspace, validates the RMF assets, then runs the requested simulation test scripts. It uses software OpenGL rendering because GitHub-hosted runners do not promise a dedicated simulator GPU.
 
@@ -17,9 +17,9 @@ The blocked-aisle case first selects a known-free staging goal at least 1.25 m a
 
 The blocked-aisle run alone enables a Nav2 simulation profile. Its XY goal tolerance is 0.35 m, matching the smoke's independent final-position limit because the base 0.25 m setting timed out with the robot 0.331 m from its goal. Its yaw tolerance remains Clearpath's stricter 0.25 rad, while the smoke independently enforces a 0.35 rad final-heading limit. The profile also extends the progress checker's movement window from 10 to 30 simulated seconds without changing its movement-radius requirement. The action must still succeed, and the smoke independently enforces final pose, a measurable detour, fresh lidar evidence, and no non-floor contact. Normal Nav2 runs are unchanged.
 
-The stale-status case first observes both simulated robots, then the smoke-test consumer deliberately discards subsequent `FleetState` entries for one robot. It passes only if the consumer detects that robot's receipt age exceeded 15 seconds before dispatching any task. This is a deterministic observer-side data-loss injection—not a DDS/network outage, an RMF adapter watchdog test, or a claim that the fleet stack itself stops a robot when status is stale. The age uses the local monotonic receipt clock because `FleetState` has no per-robot source timestamp. Separately, the adapter now checks `map → base_link` TF source-time freshness and blocks new task intake while pose data is unavailable; its timestamp and reversible RMF policy helpers have offline package tests, but the hosted fault-injection option does not yet simulate TF loss or verify the runtime decommission transition.
+The stale-status case first observes both simulated robots, then the smoke-test consumer deliberately discards subsequent `FleetState` entries for one robot. It passes only if the consumer detects that robot's receipt age exceeded 15 seconds before dispatching any task. This is a deterministic observer-side data-loss injection—not a DDS/network outage or an adapter watchdog test. The age uses the local monotonic receipt clock because `FleetState` has no per-robot source timestamp. The separate stale-TF case enables a test-only `/<robot>/test_force_stale_tf` Bool topic to force one adapter's freshness path stale while simulated TF transport continues. It verifies the stale robot's task-intake gate turns off, the other A300 remains available and completes a goal whose route is already known-free in its live map, then clears the injected state and checks that the prior task-intake policy and FleetState updates recover. This exercises the RMF decommission/recovery code path but does not simulate DDS loss, cancel an in-flight Nav2 goal, or establish a safety function.
 
-Both fault cases run only when `fault-injection` is selected. The workflow requires each expected detection to pass and includes the fault metadata and result JSON in the usual downloadable artifact.
+All three fault cases run only when `fault-injection` is selected. The workflow requires each expected detection and recovery assertion to pass and includes the fault metadata and result JSON in the usual downloadable artifact.
 
 ## Results and artifacts
 

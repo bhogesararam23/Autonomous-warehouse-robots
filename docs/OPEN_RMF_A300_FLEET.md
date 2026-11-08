@@ -22,6 +22,8 @@ The smoke client sends two fleet-level `dispatch_task_request` jobs to `goal_eas
 
 Each bridge checks the `map → base_link` transform timestamp on its 0.2-second update loop. A transform more than 1.0 second old, future-dated, unavailable, or no longer advancing is treated as stale; the timer uses a steady clock so a paused Gazebo/ROS clock does not make an unchanged transform appear fresh. While stale, the bridge stops publishing pose updates to RMF and temporarily disables that robot's direct and dispatched task intake. Once fresh transforms resume, it updates RMF with the current pose and restores the task-intake policy that was in effect before the fault. Tests cover timestamp age, paused-clock behavior, time resets, and reversible policy changes.
 
+Each bridge publishes a transient-local Boolean on `/<robot>/rmf_task_intake_available` so a late-joining observer can see the current gate state. This reports software task-intake availability only; it is not a safety signal, emergency stop, or proof that a robot has stopped.
+
 This is an availability guard, not a safety stop: it does not cancel an already-running `NavigateToPose` action or prove that the robot stopped. A delayed fault may remain undetected for up to the freshness threshold plus one bridge tick, and RMF command/commission changes are software-level behavior only. The simulation and this guard are not safety-rated and must not be connected to a physical robot.
 
 ## Goal accuracy and completion criteria
@@ -61,6 +63,8 @@ The launch stages the second Clearpath spawn, each SLAM/Nav2 stack, and the RMF 
 
 The runner creates disposable A300 profiles and a contact-instrumented warehouse world under `/tmp`; it does not modify the checked-in Clearpath profile. Before dispatch, it checks every segment and destination on each assigned A300's route for known-free live SLAM occupancy. On completion it prints the run directory and writes `fleet_result.json` with those map checks, task outcomes, final poses, schedule evidence, and contact counts. Logs and generated evidence are preserved when a test fails.
 
+The adapter-level freshness fault can be tested locally with `HUSKY_RMF_FLEET_FAULT=stale-tf ./scripts/test_husky_rmf_fleet.sh`. Only this explicit regression mode enables the test-only `/<robot>/test_force_stale_tf` Bool topic. It verifies the stale robot's task-intake gate turns off, the other A300 remains available and completes a goal on its known-free route, and the original intake policy and FleetState updates return after recovery. The injected bridge state does not interrupt DDS TF transport.
+
 The same two-robot regression can be selected in the [manual live-simulation GitHub Actions workflow](LIVE_SIMULATION_CI.md). It runs on demand rather than on every push and uploads the fleet result JSON, logs, and hosted-runner diagnostics for review.
 
 ## Manual use
@@ -92,6 +96,7 @@ Native schedule and robot-state messages can be inspected with:
 ros2 topic echo /rmf_traffic/itinerary_set
 ros2 topic echo /fleet_states
 ros2 topic echo /mutex_group_states
+ros2 topic echo /a300_00000/rmf_task_intake_available
 ```
 
 ## Limits

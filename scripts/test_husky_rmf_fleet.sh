@@ -17,6 +17,7 @@ world_file="$run_dir/warehouse_contacts.sdf"
 result_file="$run_dir/fleet_result.json"
 mkdir -p "$profiles_root"
 smoke_fault_args=()
+unset HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS
 case "${HUSKY_RMF_FLEET_FAULT:-none}" in
   none) ;;
   stale-status)
@@ -24,6 +25,10 @@ case "${HUSKY_RMF_FLEET_FAULT:-none}" in
       --fault-injection stale-status
       --status-stale-after "${HUSKY_RMF_FLEET_STALE_AFTER:-15.0}"
     )
+    ;;
+  stale-tf)
+    smoke_fault_args=(--fault-injection stale-tf)
+    export HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS=1
     ;;
   *)
     echo "Unsupported HUSKY_RMF_FLEET_FAULT: ${HUSKY_RMF_FLEET_FAULT}" >&2
@@ -244,6 +249,8 @@ fi
 
 if [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == stale-status ]]; then
   echo "PASS: injected stale FleetState was detected before task dispatch."
+elif [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == stale-tf ]]; then
+  echo "PASS: stale TF disabled RMF task intake and recovery restored the gate."
 else
   echo "PASS: Open-RMF dispatched both simulated A300s through the shared schedule."
 fi

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import threading
 import time
@@ -25,7 +26,9 @@ from rclpy.clock_type import ClockType
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.time import Time
+from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from .coordinate_transform import local_to_rmf, rmf_to_local
@@ -106,6 +109,28 @@ class RobotNav2Bridge(Node):
             DEFAULT_TRANSFORM_MAX_AGE_SECONDS
         )
         self._availability_gate: RMFRobotAvailabilityGate | None = None
+        self._test_faults_enabled = (
+            os.environ.get("HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS") == "1"
+        )
+        self._test_force_stale_tf = False
+        self._test_fault_subscription = None
+        if self._test_faults_enabled:
+            self._test_fault_subscription = self.create_subscription(
+                Bool,
+                "test_force_stale_tf",
+                self._on_test_force_stale_tf,
+                10,
+            )
+        self._intake_status_publisher = self.create_publisher(
+            Bool,
+            "rmf_task_intake_available",
+            QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+        self._published_intake_available: bool | None = None
         self._callbacks = rmf_easy.RobotCallbacks(
             self.navigate,
             self.stop,
@@ -165,6 +190,9 @@ class RobotNav2Bridge(Node):
                 self._availability_gate = RMFRobotAvailabilityGate(
                     self._update_handle
                 )
+                self._publish_intake_availability(
+                    self._availability_gate.available
+                )
             except RMFUpdateHandleNotReady:
                 now = time.monotonic()
                 if now - self._last_gate_pending_warning > 10.0:
@@ -174,6 +202,9 @@ class RobotNav2Bridge(Node):
                     )
                     self._last_gate_pending_warning = now
                 return
+        if self._test_faults_enabled and self._test_force_stale_tf:
+            self._mark_pose_unavailable("test-injected stale transform")
+            return
         pose_sample = self._local_pose()
         if pose_sample is None:
             self._mark_pose_unavailable("map-to-base transform is unavailable")
@@ -230,6 +261,7 @@ class RobotNav2Bridge(Node):
                 else:
                     try:
                         if self._availability_gate.mark_available():
+                            self._publish_intake_availability(True)
                             self.get_logger().info(
                                 f"Fresh TF restored for {self.robot_name}; "
                                 "restored its prior RMF task-intake policy"
@@ -247,6 +279,7 @@ class RobotNav2Bridge(Node):
                 self._log_commission_error("decommission", error)
                 return
             if changed:
+                self._publish_intake_availability(False)
                 self.get_logger().warning(
                     f"{self.robot_name} pose unavailable ({reason}); stopped "
                     "publishing pose updates and disabled new RMF task intake"
@@ -257,6 +290,18 @@ class RobotNav2Bridge(Node):
                     f"{self.robot_name} remains unavailable: {reason}"
                 )
                 self._last_pose_warning = time.monotonic()
+
+    def _publish_intake_availability(self, available: bool) -> None:
+        if self._published_intake_available is available:
+            return
+        message = Bool()
+        message.data = available
+        self._intake_status_publisher.publish(message)
+        self._published_intake_available = available
+
+    def _on_test_force_stale_tf(self, message: Bool) -> None:
+        if self._test_faults_enabled:
+            self._test_force_stale_tf = bool(message.data)
 
     def _log_commission_error(self, action: str, error: Exception) -> None:
         now = time.monotonic()

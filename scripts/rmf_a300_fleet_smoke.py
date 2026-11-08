@@ -23,6 +23,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from ros_gz_interfaces.msg import Contacts
+from std_msgs.msg import Bool
 from warehouse_rmf_fleet.coordinate_transform import rmf_to_local
 from warehouse_rmf_fleet.fleet_status_freshness import stale_status_ages
 
@@ -139,7 +140,11 @@ def _minimum_simultaneous_distance(
 
 class FleetSmokeNode(Node):
     def __init__(
-        self, contact_count: int, status_stale_after: float, use_sim_time: bool = True
+        self,
+        contact_count: int,
+        status_stale_after: float,
+        use_sim_time: bool = True,
+        test_fault_injection: bool = False,
     ) -> None:
         super().__init__(
             "a300_rmf_fleet_smoke",
@@ -157,6 +162,7 @@ class FleetSmokeNode(Node):
         self.request_ids: dict[str, str] = {}
         self.fleet_states: dict[str, Any] = {}
         self.fleet_state_wall_times: dict[str, float] = {}
+        self.task_intake_available: dict[str, bool] = {}
         self.status_stale_after = status_stale_after
         self.stale_injection_robot: str | None = None
         self.stale_injection_drops: dict[str, int] = {robot: 0 for robot in ROBOTS}
@@ -186,6 +192,22 @@ class FleetSmokeNode(Node):
                     10,
                 )
             )
+            self.create_subscription(
+                Bool,
+                f"/{robot}/rmf_task_intake_available",
+                lambda message, robot_name=robot: self._on_intake_availability(
+                    robot_name, message
+                ),
+                transient_qos,
+            )
+        self.test_fault_publishers: dict[str, Any] = {}
+        if test_fault_injection:
+            self.test_fault_publishers = {
+                robot: self.create_publisher(
+                    Bool, f"/{robot}/test_force_stale_tf", 10
+                )
+                for robot in ROBOTS
+            }
 
         self.create_subscription(ApiResponse, "task_api_responses", self._on_response, 30)
         self.create_subscription(DispatchStates, "dispatch_states", self._on_dispatch_states, 10)
@@ -245,6 +267,9 @@ class FleetSmokeNode(Node):
                 continue
             self.fleet_states[name] = robot
             self.fleet_state_wall_times[name] = time.monotonic()
+
+    def _on_intake_availability(self, robot: str, message: Bool) -> None:
+        self.task_intake_available[robot] = bool(message.data)
 
     def stale_fleet_statuses(self, now: float | None = None) -> dict[str, float]:
         return stale_status_ages(
@@ -352,6 +377,27 @@ class FleetSmokeNode(Node):
             if predicate():
                 return
         raise FleetSmokeError(f"Timed out waiting for {description} after {timeout:.0f}s")
+
+    def set_test_force_stale_tf(self, robot: str, stale: bool) -> None:
+        if robot not in ROBOTS:
+            raise FleetSmokeError(f"Unknown robot for stale-TF fault: {robot}")
+        publisher = self.test_fault_publishers.get(robot)
+        if publisher is None:
+            raise FleetSmokeError(
+                "The test-only stale-TF publisher was not enabled for this run"
+            )
+        topic = f"/{robot}/test_force_stale_tf"
+        self.spin_until(
+            f"the adapter's test-only stale-TF subscriber on {topic}",
+            lambda: self.count_subscribers(topic) > 0,
+            10.0,
+        )
+        message = Bool()
+        message.data = stale
+        publisher.publish(message)
+        self.get_logger().info(
+            f"Set test-only stale-TF injection for {robot} to {stale}"
+        )
 
     def verify_contact_publishers(self, timeout: float) -> None:
         self.spin_until(
@@ -463,10 +509,16 @@ class FleetSmokeNode(Node):
                 record["status"] = "known_free"
                 previous_x, previous_y = goal_x, goal_y
 
-    def dispatch_goal_tasks(self) -> dict[str, str]:
+    def dispatch_goal_tasks(
+        self,
+        goals: tuple[str, ...] = GOAL_NAMES,
+        expected_robots: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         request_ids: dict[str, str] = {}
         assigned_robots: set[str] = set()
-        for goal in GOAL_NAMES:
+        for goal in goals:
+            if goal not in GOAL_NAMES:
+                raise FleetSmokeError(f"Unsupported dispatch goal: {goal}")
             now: RosTime = self.get_clock().now().to_msg()
             start_ms = int(now.sec) * 1000 + round(int(now.nanosec) / 1_000_000)
             request_id = "fleet_" + str(uuid.uuid4())
@@ -518,9 +570,15 @@ class FleetSmokeNode(Node):
             )
             assignment = self.dispatch_state_for_request(request_id)
             assigned_robot = str(assignment["expected_robot_name"])
+            expected_robot = (expected_robots or {}).get(goal)
+            if expected_robot is not None and assigned_robot != expected_robot:
+                raise FleetSmokeError(
+                    f"RMF assigned {goal} to {assigned_robot}, but the test expected "
+                    f"{expected_robot}: {assignment}"
+                )
             assigned_robots.add(assigned_robot)
             self.get_logger().info(f"RMF dispatcher assigned {goal} to {assigned_robot}")
-            if len(assigned_robots) == 1:
+            if len(assigned_robots) == 1 and len(goals) > 1:
                 first_robot = assigned_robot
                 start_x, start_y = STARTS[first_robot]
 
@@ -563,6 +621,122 @@ class FleetSmokeNode(Node):
                     "submitting the second task while its task remains active"
                 )
         return request_ids
+
+    def run_stale_tf_gate_regression(self, timeout: float) -> dict[str, Any]:
+        injected_robot = ROBOTS[0]
+        available_robot = ROBOTS[1]
+        self.spin_until(
+            "both RMF task-intake gates to report available before injection",
+            lambda: all(
+                self.task_intake_available.get(robot) is True for robot in ROBOTS
+            ),
+            20.0,
+        )
+        self.set_test_force_stale_tf(injected_robot, True)
+        self.spin_until(
+            f"RMF to disable task intake for stale {injected_robot}",
+            lambda: self.task_intake_available.get(injected_robot) is False,
+            10.0,
+        )
+        if self.task_intake_available.get(available_robot) is not True:
+            raise FleetSmokeError(
+                f"Stale-TF injection unexpectedly disabled {available_robot} too"
+            )
+        disabled_observed = self.task_intake_available[injected_robot] is False
+        healthy_robot_remained_available = (
+            self.task_intake_available[available_robot] is True
+        )
+
+        request_ids = self.dispatch_goal_tasks(
+            goals=("goal_east",),
+            expected_robots={"goal_east": available_robot},
+        )
+        request_id = request_ids["goal_east"]
+        assignment = self.dispatch_state_for_request(request_id)
+        if assignment is None:
+            raise FleetSmokeError("No dispatch state was recorded for the stale-TF task")
+
+        self.set_test_force_stale_tf(injected_robot, False)
+        recovery_requested_at = time.monotonic()
+        self.spin_until(
+            f"RMF to restore task intake for recovered {injected_robot}",
+            lambda: self.task_intake_available.get(injected_robot) is True,
+            15.0,
+        )
+        self.spin_until(
+            f"fresh FleetState to resume for recovered {injected_robot}",
+            lambda: self.fleet_state_wall_times.get(injected_robot, 0.0)
+            >= recovery_requested_at
+            and injected_robot not in self.stale_fleet_statuses(),
+            15.0,
+        )
+
+        def dispatched_goal_completed() -> bool:
+            current_assignment = self.dispatch_state_for_request(request_id)
+            state = self.fleet_states.get(available_robot)
+            if (
+                current_assignment is None
+                or current_assignment["status"] != DispatchState.STATUS_DISPATCHED
+                or not current_assignment["is_assigned"]
+                or current_assignment["expected_robot_name"] != available_robot
+                or state is None
+            ):
+                return False
+            goal_x, goal_y = GOAL_POSES["goal_east"]
+            xy_error = math.hypot(
+                float(state.location.x) - goal_x,
+                float(state.location.y) - goal_y,
+            )
+            yaw_error = _angle_error(
+                float(state.location.yaw), GOAL_YAWS[available_robot]
+            )
+            return (
+                not str(state.task_id).strip()
+                and int(state.mode.mode) == 0
+                and xy_error <= GOAL_XY_TOLERANCE_M
+                and yaw_error <= GOAL_YAW_TOLERANCE_RAD
+            )
+
+        self.spin_until(
+            f"the stale-TF test goal to complete on {available_robot}",
+            dispatched_goal_completed,
+            timeout,
+            require_fresh_status=True,
+        )
+        for _ in range(10):
+            rclpy.spin_once(self, timeout_sec=0.1)
+        if self.contact_hits:
+            raise FleetSmokeError(
+                "Non-floor Gazebo contact observed during the stale-TF test: "
+                + json.dumps(self.contact_hits[:6])
+            )
+        final_state = self.fleet_states[available_robot]
+        return {
+            "status": "passed",
+            "simulation": "Gazebo Harmonic headless; Clearpath Husky A300 warehouse world",
+            "fault_injection": {
+                "scenario": "stale-tf-task-intake",
+                "injection_boundary": "test-only Bool topic forces its TF freshness path stale; DDS TF data continues",
+                "robot": injected_robot,
+                "task_intake_disabled_observed": disabled_observed,
+                "other_robot_remained_available": healthy_robot_remained_available,
+                "goal": "goal_east",
+                "dispatch_task_request_id": request_id,
+                "assigned_robot": assignment["expected_robot_name"],
+                "recovery_restored_task_intake": self.task_intake_available[injected_robot]
+                is True,
+                "recovery_resumed_fleet_state": injected_robot
+                not in self.stale_fleet_statuses(),
+                "completed_robot_pose_rmf": [
+                    float(final_state.location.x),
+                    float(final_state.location.y),
+                    float(final_state.location.yaw),
+                ],
+                "non_floor_contacts": self.contact_hits,
+                "result": "The stale robot's task-intake gate decommissioned it while the healthy A300 completed a known-free goal; the previous task-intake policy and FleetState updates resumed after TF freshness recovered",
+                "limitation": "This exercises the adapter gate with an opt-in stale-state injection; it does not simulate DDS transport loss or constitute a safety test.",
+            },
+        }
 
     def snapshot(self, request_ids: dict[str, str], start_poses: dict[str, list[float]]) -> dict[str, Any]:
         goals = {}
@@ -718,7 +892,9 @@ def main() -> int:
     parser.add_argument("--status-stale-after", type=float, default=15.0)
     parser.add_argument("--status-fault-timeout", type=float, default=35.0)
     parser.add_argument(
-        "--fault-injection", choices=("none", "stale-status"), default="none"
+        "--fault-injection",
+        choices=("none", "stale-status", "stale-tf"),
+        default="none",
     )
     parser.add_argument("--result-file", type=Path, required=True)
     args = parser.parse_args()
@@ -740,7 +916,11 @@ def main() -> int:
         parser.error("runtime Nav2 goal-checker parameters do not match the smoke configuration")
 
     rclpy.init(args=sys.argv)
-    node = FleetSmokeNode(args.contact_count, args.status_stale_after)
+    node = FleetSmokeNode(
+        args.contact_count,
+        args.status_stale_after,
+        test_fault_injection=args.fault_injection == "stale-tf",
+    )
     try:
         node.spin_until("non-zero Gazebo clock", lambda: node.get_clock().now().nanoseconds > 0, 60.0)
         node.verify_contact_publishers(60.0)
@@ -814,6 +994,24 @@ def main() -> int:
             args.result_file.write_text(json.dumps(fault_result, indent=2) + "\n", encoding="utf-8")
             print(json.dumps(fault_result, indent=2))
             print(f"PASS: stale FleetState was detected before dispatch. Evidence: {args.result_file}")
+            return 0
+        if args.fault_injection == "stale-tf":
+            node.check_initial_map_routes(start_poses)
+            if node.contact_hits:
+                raise FleetSmokeError(
+                    "Non-floor contact observed before stale-TF injection: "
+                    + json.dumps(node.contact_hits[:4])
+                )
+            fault_result = node.run_stale_tf_gate_regression(args.timeout)
+            args.result_file.parent.mkdir(parents=True, exist_ok=True)
+            args.result_file.write_text(
+                json.dumps(fault_result, indent=2) + "\n", encoding="utf-8"
+            )
+            print(json.dumps(fault_result, indent=2))
+            print(
+                f"PASS: stale TF excluded the robot from RMF task intake and recovery restored it. "
+                f"Evidence: {args.result_file}"
+            )
             return 0
         node.check_initial_map_routes(start_poses)
         if node.contact_hits:
