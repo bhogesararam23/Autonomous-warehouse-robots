@@ -3,6 +3,7 @@
 
 import atexit
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,9 @@ from launch.actions import (
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import PushRosNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nav2_fault_profile import apply_fault_test_profile
 
 
 SCAN_TOPIC_PATHS = (
@@ -54,6 +58,9 @@ def write_merged_params(params):
 def launch_setup(context, *args, **kwargs):
     del args, kwargs
     setup_path = LaunchConfiguration("setup_path").perform(context)
+    fault_test_profile_enabled = (
+        LaunchConfiguration("fault_test_profile").perform(context).lower() == "true"
+    )
     robot_yaml = Path(setup_path) / "robot.yaml"
     if not robot_yaml.is_file():
         raise RuntimeError(
@@ -100,7 +107,10 @@ def launch_setup(context, *args, **kwargs):
         .get("ros__parameters", {})
         .get("general_goal_checker", {})
     )
-    if goal_checker_overrides:
+    if fault_test_profile_enabled:
+        profile = apply_fault_test_profile(params)
+        print(f"Applied Nav2 fault-test profile: {profile}", flush=True)
+    elif goal_checker_overrides:
         controller_parameters = params.get("controller_server", {}).get(
             "ros__parameters", {}
         )
@@ -173,6 +183,15 @@ def generate_launch_description():
                 "scan_topic",
                 default_value="",
                 description="Override the A300 2D lidar topic",
+            ),
+            DeclareLaunchArgument(
+                "fault_test_profile",
+                default_value="false",
+                choices=["true", "false"],
+                description=(
+                    "Use bounded controller progress timing for the blocked-aisle "
+                    "simulation regression only."
+                ),
             ),
             DeclareLaunchArgument(
                 "autostart",

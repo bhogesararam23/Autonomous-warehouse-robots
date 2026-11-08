@@ -18,6 +18,7 @@ fault_model="$run_dir/blocked_aisle_obstacle.sdf"
 fault_injection="${HUSKY_SMOKE_FAULT:-none}"
 smoke_fault_args=()
 smoke_fault_model_args=()
+smoke_nav2_launch_args=()
 default_action_timeout=180
 case "$fault_injection" in
   none) ;;
@@ -29,6 +30,7 @@ case "$fault_injection" in
       --minimum-goal-distance-m 1.8
     )
     smoke_fault_model_args=(--fault-model-file "$fault_model")
+    smoke_nav2_launch_args=(fault_test_profile:=true)
     ;;
   *)
     echo "Unsupported HUSKY_SMOKE_FAULT: $fault_injection" >&2
@@ -178,6 +180,7 @@ wait_for_publisher /a300_00000/map 150
 
 setsid ros2 launch warehouse_astar_planner nav2.launch.py \
   setup_path:="$setup_dir" use_sim_time:=true \
+  "${smoke_nav2_launch_args[@]}" \
   >"$run_dir/nav2.log" 2>&1 &
 nav2_pid=$!
 
