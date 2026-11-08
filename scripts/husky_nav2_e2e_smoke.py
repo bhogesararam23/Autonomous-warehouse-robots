@@ -33,6 +33,7 @@ from fault_injection import (
     BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M,
     BLOCKED_AISLE_SIZE,
     blocked_aisle_model_sdf,
+    blocked_aisle_spawn_pose_args,
     find_scan_return,
     max_cross_track_deviation,
     validate_blocked_aisle_model,
@@ -616,6 +617,9 @@ def spawn_blocked_aisle(
         )
 
     scan_count_before_spawn = node.scan_message_count
+    spawn_pose_args = blocked_aisle_spawn_pose_args(
+        (center_world_x, center_world_y), world_yaw
+    )
     spawn_command = [
         "ros2",
         "run",
@@ -625,6 +629,7 @@ def spawn_blocked_aisle(
         "warehouse",
         "-file",
         str(args.fault_model_file),
+        *spawn_pose_args,
     ]
     completed = subprocess.run(
         spawn_command,
@@ -637,12 +642,29 @@ def spawn_blocked_aisle(
     spawn_time = time.monotonic()
     spawn_sim_time_ns = int(node.get_clock().now().nanoseconds)
     spawn_evidence: dict[str, Any] = {
-        "spawn_command": "ros2 run ros_gz_sim create -world warehouse -file <validated model>",
+        "spawn_command": " ".join(
+            [
+                "ros2",
+                "run",
+                "ros_gz_sim",
+                "create",
+                "-world",
+                "warehouse",
+                "-file",
+                "<validated model>",
+                *spawn_pose_args,
+            ]
+        ),
         "spawn_response": response[-1200:],
         "spawn_exit_code": completed.returncode,
         "map_center_xy_m": list(center_map),
         "world_center_xy_m": [center_world_x, center_world_y],
         "world_orientation_yaw_rad": world_yaw,
+        "spawn_pose_world_xyz_m": [
+            center_world_x,
+            center_world_y,
+            BLOCKED_AISLE_SIZE[2] / 2.0,
+        ],
         "model_sha256": model_digest,
         "scan_messages_before_spawn": scan_count_before_spawn,
         "spawn_sim_time_ns": spawn_sim_time_ns,

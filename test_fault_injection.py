@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent / "scripts"))
 from fault_injection import (  # noqa: E402
     BLOCKED_AISLE_MODEL,
     blocked_aisle_model_sdf,
+    blocked_aisle_spawn_pose_args,
     find_scan_return,
     inject_blocked_aisle,
     max_cross_track_deviation,
@@ -32,6 +33,25 @@ class FaultInjectionTest(unittest.TestCase):
         self.assertEqual(
             model.findtext("link/collision/geometry/box/size"), "0.550 1.200 1.500"
         )
+
+    def test_spawn_pose_arguments_explicitly_set_world_position_and_yaw(self):
+        arguments = blocked_aisle_spawn_pose_args((2.732796, -0.0005), -0.002403)
+
+        self.assertEqual(
+            arguments,
+            [
+                "-x",
+                "2.732796",
+                "-y",
+                "-0.000500",
+                "-z",
+                "0.750",
+                "-Y",
+                "-0.002403000",
+            ],
+        )
+        with self.assertRaises(ValueError):
+            blocked_aisle_spawn_pose_args((float("nan"), 0.0), 0.0)
 
     def test_malformed_or_changed_obstacle_model_is_rejected(self):
         with self.assertRaises(ValueError):

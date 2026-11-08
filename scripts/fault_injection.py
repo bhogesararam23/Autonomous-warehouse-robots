@@ -26,6 +26,25 @@ BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M = round(
 )
 
 
+def blocked_aisle_spawn_pose_args(
+    center_xy: tuple[float, float], yaw_rad: float
+) -> list[str]:
+    """Return explicit Gazebo create pose flags matching the validated model SDF."""
+    x, y, yaw = float(center_xy[0]), float(center_xy[1]), float(yaw_rad)
+    if not all(math.isfinite(value) for value in (x, y, yaw)):
+        raise ValueError("Blocked-aisle spawn pose must contain finite values")
+    return [
+        "-x",
+        f"{x:.6f}",
+        "-y",
+        f"{y:.6f}",
+        "-z",
+        f"{BLOCKED_AISLE_POSE_Z:.3f}",
+        "-Y",
+        f"{yaw:.9f}",
+    ]
+
+
 def find_scan_return(
     ranges: Sequence[float],
     *,
