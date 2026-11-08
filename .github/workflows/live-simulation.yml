@@ -114,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HUSKY_SMOKE_RUN_ROOT" "$ROS_LOG_DIR"
-          ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/nav2-workflow.log"
+          bash ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/nav2-workflow.log"
 
       - name: Run headless two-A300 Open-RMF fleet regression
         id: rmf_fleet
@@ -143,7 +143,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HUSKY_SMOKE_RUN_ROOT" "$ROS_LOG_DIR"
-          ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/blocked-aisle-workflow.log"
+          bash ./scripts/test_husky_nav2_e2e.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/blocked-aisle-workflow.log"
 
       - name: Run stale-status Open-RMF fault injection
         id: stale_status
