@@ -6,6 +6,8 @@ import math
 from typing import Any
 
 
+FAULT_GOAL_XY_TOLERANCE_M = 0.35
+FAULT_GOAL_YAW_TOLERANCE_RAD = 0.35
 FAULT_PROGRESS_MOVEMENT_ALLOWANCE_S = 30.0
 
 
@@ -20,11 +22,11 @@ def _positive_number(settings: dict[str, Any], name: str, label: str) -> float:
 
 
 def apply_fault_test_profile(params: dict[str, Any]) -> dict[str, Any]:
-    """Preserve vendor goal tolerances and allow bounded slow progress in the fault run.
+    """Align action completion with the smoke acceptance in the fault run.
 
-    This profile deliberately changes only the progress checker's movement time
-    allowance. The A300's installed goal-checker tolerances remain authoritative;
-    the smoke client independently enforces its own final-pose tolerances.
+    The controller goal checker uses the same 0.35 m / 0.35 rad thresholds as the
+    smoke client's independent final-pose assertion. The profile also extends the
+    progress checker's movement window while retaining its required movement radius.
     """
     controller = params.get("controller_server", {}).get("ros__parameters")
     if not isinstance(controller, dict):
@@ -38,10 +40,10 @@ def apply_fault_test_profile(params: dict[str, Any]) -> dict[str, Any]:
         or not isinstance(goal_checker, dict)
     ):
         raise ValueError("Clearpath A300 Nav2 general_goal_checker schema changed")
-    goal_xy = _positive_number(
+    default_goal_xy = _positive_number(
         goal_checker, "xy_goal_tolerance", "general_goal_checker.xy_goal_tolerance"
     )
-    goal_yaw = _positive_number(
+    default_goal_yaw = _positive_number(
         goal_checker, "yaw_goal_tolerance", "general_goal_checker.yaw_goal_tolerance"
     )
 
@@ -64,11 +66,15 @@ def apply_fault_test_profile(params: dict[str, Any]) -> dict[str, Any]:
         "progress_checker.movement_time_allowance",
     )
 
+    goal_checker["xy_goal_tolerance"] = FAULT_GOAL_XY_TOLERANCE_M
+    goal_checker["yaw_goal_tolerance"] = FAULT_GOAL_YAW_TOLERANCE_RAD
     progress_checker["movement_time_allowance"] = FAULT_PROGRESS_MOVEMENT_ALLOWANCE_S
     return {
         "profile": "blocked-aisle-simulation",
-        "goal_checker_xy_tolerance_m": goal_xy,
-        "goal_checker_yaw_tolerance_rad": goal_yaw,
+        "goal_checker_default_xy_tolerance_m": default_goal_xy,
+        "goal_checker_default_yaw_tolerance_rad": default_goal_yaw,
+        "goal_checker_xy_tolerance_m": FAULT_GOAL_XY_TOLERANCE_M,
+        "goal_checker_yaw_tolerance_rad": FAULT_GOAL_YAW_TOLERANCE_RAD,
         "progress_checker_required_movement_radius_m": required_radius,
         "progress_checker_default_movement_time_allowance_s": default_allowance,
         "progress_checker_movement_time_allowance_s": FAULT_PROGRESS_MOVEMENT_ALLOWANCE_S,

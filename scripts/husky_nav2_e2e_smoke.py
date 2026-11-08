@@ -14,6 +14,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+NAV2_PROFILE_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "ros2_ws"
+    / "src"
+    / "warehouse_astar_planner"
+    / "launch"
+)
+sys.path.insert(0, str(NAV2_PROFILE_DIR))
+
 import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped
@@ -28,6 +37,10 @@ from rclpy.time import Time
 from ros_gz_interfaces.msg import Contacts
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformException, TransformListener
+from nav2_fault_profile import (
+    FAULT_GOAL_XY_TOLERANCE_M,
+    FAULT_GOAL_YAW_TOLERANCE_RAD,
+)
 from fault_injection import (
     BLOCKED_AISLE_MIN_DETOUR_M,
     BLOCKED_AISLE_MIN_ROUTE_DISTANCE_M,
@@ -1294,8 +1307,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-auto-goal-distance-m", type=float, default=3.0)
     parser.add_argument("--clearance-m", type=float, default=0.65)
     parser.add_argument("--max-occupancy", type=int, default=20)
-    parser.add_argument("--xy-tolerance-m", type=float, default=0.35)
-    parser.add_argument("--yaw-tolerance-rad", type=float, default=0.35)
+    parser.add_argument(
+        "--xy-tolerance-m", type=float, default=FAULT_GOAL_XY_TOLERANCE_M
+    )
+    parser.add_argument(
+        "--yaw-tolerance-rad", type=float, default=FAULT_GOAL_YAW_TOLERANCE_RAD
+    )
     return parser.parse_args()
 
 
