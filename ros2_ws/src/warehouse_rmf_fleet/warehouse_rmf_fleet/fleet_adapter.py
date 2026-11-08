@@ -20,6 +20,8 @@ import yaml
 from action_msgs.msg import GoalStatus
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
+from rclpy.clock import Clock
+from rclpy.clock_type import ClockType
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -27,6 +29,12 @@ from rclpy.time import Time
 from tf2_ros import Buffer, TransformException, TransformListener
 
 from .coordinate_transform import local_to_rmf, rmf_to_local
+from .robot_availability import (
+    DEFAULT_TRANSFORM_MAX_AGE_SECONDS,
+    RMFRobotAvailabilityGate,
+    RMFUpdateHandleNotReady,
+    TransformFreshnessMonitor,
+)
 
 
 BATTERY_SOC = 0.95
@@ -91,25 +99,43 @@ class RobotNav2Bridge(Node):
         self._last_tf_warning = 0.0
         self._last_action_warning = 0.0
         self._last_registration_attempt = 0.0
+        self._last_pose_warning = 0.0
+        self._last_commission_error = 0.0
+        self._last_gate_pending_warning = 0.0
+        self._tf_freshness = TransformFreshnessMonitor(
+            DEFAULT_TRANSFORM_MAX_AGE_SECONDS
+        )
+        self._availability_gate: RMFRobotAvailabilityGate | None = None
         self._callbacks = rmf_easy.RobotCallbacks(
             self.navigate,
             self.stop,
             self.execute_action,
         )
-        self._timer = self.create_timer(state_update_period, self._tick)
+        self._timer = self.create_timer(
+            state_update_period,
+            self._tick,
+            clock=Clock(clock_type=ClockType.STEADY_TIME),
+        )
         self.get_logger().info(
             f"Waiting for TF {self.map_frame}->{self.base_frame} and "
             f"action server /{self.namespace}/navigate_to_pose; "
             f"facility origin={self.map_origin}"
         )
 
-    def _local_pose(self) -> tuple[float, float, float] | None:
+    def _local_pose(self) -> tuple[tuple[float, float, float], int] | None:
         for map_frame in _frame_candidates(self.namespace, self.map_frame):
             for base_frame in _frame_candidates(self.namespace, self.base_frame):
                 try:
                     tf = self._tf_buffer.lookup_transform(map_frame, base_frame, Time())
                     t = tf.transform.translation
-                    return float(t.x), float(t.y), yaw_from_quaternion(tf.transform.rotation)
+                    stamp_ns = (
+                        int(tf.header.stamp.sec) * 1_000_000_000
+                        + int(tf.header.stamp.nanosec)
+                    )
+                    return (
+                        (float(t.x), float(t.y), yaw_from_quaternion(tf.transform.rotation)),
+                        stamp_ns,
+                    )
                 except TransformException:
                     continue
         now = time.monotonic()
@@ -134,8 +160,34 @@ class RobotNav2Bridge(Node):
         )
 
     def _tick(self) -> None:
-        local_pose = self._local_pose()
-        if local_pose is None:
+        if self._update_handle is not None and self._availability_gate is None:
+            try:
+                self._availability_gate = RMFRobotAvailabilityGate(
+                    self._update_handle
+                )
+            except RMFUpdateHandleNotReady:
+                now = time.monotonic()
+                if now - self._last_gate_pending_warning > 10.0:
+                    self.get_logger().info(
+                        f"Waiting for RMF to finish initializing the update "
+                        f"handle for {self.robot_name}"
+                    )
+                    self._last_gate_pending_warning = now
+                return
+        pose_sample = self._local_pose()
+        if pose_sample is None:
+            self._mark_pose_unavailable("map-to-base transform is unavailable")
+            return
+        local_pose, transform_stamp_ns = pose_sample
+        now_ros_ns = self.get_clock().now().nanoseconds
+        if not self._tf_freshness.observe(
+            transform_stamp_ns,
+            now_ros_ns,
+            monotonic_now=time.monotonic(),
+        ):
+            self._mark_pose_unavailable(
+                "map-to-base transform is stale, future-dated, or not advancing"
+            )
             return
         if not self._action_client.server_is_ready():
             now = time.monotonic()
@@ -172,6 +224,49 @@ class RobotNav2Bridge(Node):
                 return
             activity = self._execution.identifier if self._execution is not None else None
             self._update_handle.update(state, activity)
+            if self._availability_gate is not None:
+                if self._availability_gate.available:
+                    self._availability_gate.refresh_baseline()
+                else:
+                    try:
+                        if self._availability_gate.mark_available():
+                            self.get_logger().info(
+                                f"Fresh TF restored for {self.robot_name}; "
+                                "restored its prior RMF task-intake policy"
+                            )
+                    except Exception as error:
+                        self._log_commission_error("restore", error)
+
+    def _mark_pose_unavailable(self, reason: str) -> None:
+        with self._lock:
+            if self._availability_gate is None:
+                return
+            try:
+                changed = self._availability_gate.mark_unavailable()
+            except Exception as error:
+                self._log_commission_error("decommission", error)
+                return
+            if changed:
+                self.get_logger().warning(
+                    f"{self.robot_name} pose unavailable ({reason}); stopped "
+                    "publishing pose updates and disabled new RMF task intake"
+                )
+                self._last_pose_warning = time.monotonic()
+            elif time.monotonic() - self._last_pose_warning > 10.0:
+                self.get_logger().warning(
+                    f"{self.robot_name} remains unavailable: {reason}"
+                )
+                self._last_pose_warning = time.monotonic()
+
+    def _log_commission_error(self, action: str, error: Exception) -> None:
+        now = time.monotonic()
+        if now - self._last_commission_error <= 10.0:
+            return
+        self.get_logger().fatal(
+            f"Could not {action} {self.robot_name} in RMF after a TF freshness "
+            f"change; task-intake state may not match telemetry: {error}"
+        )
+        self._last_commission_error = now
 
     def navigate(self, destination: Any, execution: Any) -> None:
         """Convert the next RMF waypoint into a local Nav2 goal."""
