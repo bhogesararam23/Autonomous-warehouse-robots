@@ -4,7 +4,7 @@
 
 ## Recommendation
 
-Keep the current project as a simulation and visualization product while making its simulation core trustworthy, extensible, and testable. Do not connect the current browser UI or A* function directly to physical robot motion. If a ROS 2-based product is the goal, treat Nav2 as a candidate for per-robot navigation and evaluate Open-RMF for fleet-level coordination; neither replaces a machine-specific safety system. Nav2 separates navigation into middleware/lifecycle, task orchestration, navigation servers, state estimation, and environmental representation [1]. Open-RMF provides coordination and interoperability concepts for fleets and facility infrastructure [2] [3].
+Keep the project as a simulation and visualization product while making its simulation core trustworthy, extensible, and testable. Continue using the selected Clearpath Husky A300, ROS 2 Jazzy, Gazebo Harmonic, Nav2, and Open-RMF stack for simulation-only integration. Do not connect the browser UI or A* function directly to physical robot motion; Nav2 and Open-RMF provide useful non-safety navigation and fleet-coordination capabilities, not a replacement for machine-specific safety functions [1] [2] [3].
 
 The near-term focus is to keep hardening the simulation and fleet reliability gates while maintaining the explicitly simulation-only target stack: Clearpath Husky A300, ROS 2 Jazzy, Gazebo Harmonic, Nav2, and Open-RMF. Several foundations from Phases 2–4 are now implemented in simulation; the phases below remain capability goals, not evidence that their exit criteria or any physical safety requirements have been met.
 
@@ -74,19 +74,19 @@ Expand tests from hand-authored cases to property-based and generated scenarios,
 
 ### Phase 2 — Model multiple robots and shared resources
 
-Move from “other agents are repeating obstacles” to multiple planned participants with routes, time windows, robot capabilities, and reservations for narrow aisles, crossings, doors, lifts, and charging stations as needed by the selected use case. Add explicit delay, obstruction, stale-status, and communication-loss cases. Introduce deadlock detection and a documented resolution policy: reserve, reroute, wait with a timeout, or enter a degraded/stopped state. Do not silently assume a planned itinerary is the robot's actual position.
+The ROS/Open-RMF baseline already coordinates two simulated A300 participants on a shared traffic schedule, while the grid A* demonstration still represents other agents as repeating obstacles. Extend the relevant simulation layer with explicit tasks, route intents, time windows, robot capabilities, and reservations for narrow aisles or shared resources. Add delay, obstruction, stale-status, and communication-loss scenarios; define deadlock detection and a documented response such as reserve, reroute, wait with a timeout, or enter a degraded state. Do not silently assume a planned itinerary is the robot's actual position.
 
 **Exit criteria:** at the fleet size chosen in Phase 0, a fixed suite of at least 1,000 seeded test episodes has no model-level conflicts among accepted reservations; every injected obstruction or stale participant yields a logged replan, timeout, or safe degraded state; no episode remains indefinitely in an unreported wait; all random runs are reproducible from their seed and scenario version. Report throughput, wait time, deadlocks, and planner latency, not just path length.
 
 ### Phase 3 — Add robot-in-the-loop software simulation
 
-Only after a robot or generic robot profile and ROS 2 distribution are chosen, create a software-in-the-loop environment using the selected robot description and simulator. Connect the planner/fleet contracts to a ROS 2 adapter and the per-robot navigation stack. Test localization drift, sensor occlusion, map mismatch, blocked routes, recovery behavior, process restart, and network interruption. A simulator is still not a safety validation of the real vehicle.
+The current software-in-the-loop baseline launches two simulated A300 robots with Nav2 in Gazebo Harmonic and connects them to the ROS 2 fleet adapter. Continue testing localization drift, sensor occlusion, map mismatch, blocked routes, recovery behavior, process restart, and network interruption. A simulator is still not a safety validation of the real vehicle.
 
 **Exit criteria:** a clean setup can launch the selected software stack and at least one robot model reproducibly; commands, status, task completion, and timestamps have documented mappings; injected stale sensor/robot status cannot be interpreted as fresh success; recovery and operator-visible faults are exercised by automated tests. Record the exact ROS distribution, Nav2 release, simulator, robot model, and interface version.
 
 ### Phase 4 — Integrate fleet coordination and operator workflows
 
-If multi-robot or mixed-fleet coordination is required, evaluate Open-RMF against the selected robot vendor APIs and facility systems. Build and test a fleet adapter for one simulated fleet before attempting multiple vendors. Define whether the adapter has full control, limited pause/resume control, or read-only status; Open-RMF documents these as distinct integration capabilities, with trade-offs for coordination [3]. Add operator authorization, command audit, alarms, and recovery procedures.
+The current Open-RMF adapter coordinates a simulated two-A300 fleet. Harden this integration with route-conflict, delayed-participant, unavailable-robot, and schedule-failure cases before broadening to additional vendors or facility systems. Define whether future integrations need full control, limited pause/resume control, or read-only status; Open-RMF documents these as distinct capabilities with coordination trade-offs [3]. Operator authorization, command audit, alarms, and recovery procedures remain future software requirements, not evidence of physical readiness.
 
 **Exit criteria:** at least two simulated fleet participants share a traffic schedule; route conflicts trigger negotiation or a documented stop/degraded response; delayed, unavailable, or read-only participants are represented honestly; task state and robot state discrepancies are surfaced rather than hidden; adapter and schedule failures are covered by repeatable integration tests.
 
