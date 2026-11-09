@@ -113,6 +113,7 @@ class RobotNav2Bridge(Node):
             os.environ.get("HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS") == "1"
         )
         self._test_force_stale_tf = False
+        self._test_force_nav2_unavailable = False
         self._test_fault_subscription = None
         if self._test_faults_enabled:
             self._test_fault_subscription = self.create_subscription(
@@ -121,6 +122,14 @@ class RobotNav2Bridge(Node):
                 self._on_test_force_stale_tf,
                 10,
             )
+            self._test_nav2_fault_subscription = self.create_subscription(
+                Bool,
+                "test_force_nav2_unavailable",
+                self._on_test_force_nav2_unavailable,
+                10,
+            )
+        else:
+            self._test_nav2_fault_subscription = None
         self._intake_status_publisher = self.create_publisher(
             Bool,
             "rmf_task_intake_available",
@@ -203,11 +212,11 @@ class RobotNav2Bridge(Node):
                     self._last_gate_pending_warning = now
                 return
         if self._test_faults_enabled and self._test_force_stale_tf:
-            self._mark_pose_unavailable("test-injected stale transform")
+            self._mark_robot_unavailable("test-injected stale transform")
             return
         pose_sample = self._local_pose()
         if pose_sample is None:
-            self._mark_pose_unavailable("map-to-base transform is unavailable")
+            self._mark_robot_unavailable("map-to-base transform is unavailable")
             return
         local_pose, transform_stamp_ns = pose_sample
         now_ros_ns = self.get_clock().now().nanoseconds
@@ -216,17 +225,22 @@ class RobotNav2Bridge(Node):
             now_ros_ns,
             monotonic_now=time.monotonic(),
         ):
-            self._mark_pose_unavailable(
+            self._mark_robot_unavailable(
                 "map-to-base transform is stale, future-dated, or not advancing"
             )
             return
-        if not self._action_client.server_is_ready():
-            now = time.monotonic()
-            if now - self._last_action_warning > 10.0:
-                self.get_logger().info(
-                    f"Waiting for Nav2 action server /{self.namespace}/navigate_to_pose"
+        if not self._nav2_action_server_ready():
+            if self._update_handle is None:
+                now = time.monotonic()
+                if now - self._last_action_warning > 10.0:
+                    self.get_logger().info(
+                        f"Waiting for Nav2 action server /{self.namespace}/navigate_to_pose"
+                    )
+                    self._last_action_warning = now
+            else:
+                self._mark_robot_unavailable(
+                    "Nav2 NavigateToPose action server is unavailable"
                 )
-                self._last_action_warning = now
             return
         state = self._rmf_state(local_pose)
         with self._lock:
@@ -263,13 +277,13 @@ class RobotNav2Bridge(Node):
                         if self._availability_gate.mark_available():
                             self._publish_intake_availability(True)
                             self.get_logger().info(
-                                f"Fresh TF restored for {self.robot_name}; "
+                                f"Robot health recovered for {self.robot_name}; "
                                 "restored its prior RMF task-intake policy"
                             )
                     except Exception as error:
                         self._log_commission_error("restore", error)
 
-    def _mark_pose_unavailable(self, reason: str) -> None:
+    def _mark_robot_unavailable(self, reason: str) -> None:
         with self._lock:
             if self._availability_gate is None:
                 return
@@ -281,7 +295,7 @@ class RobotNav2Bridge(Node):
             if changed:
                 self._publish_intake_availability(False)
                 self.get_logger().warning(
-                    f"{self.robot_name} pose unavailable ({reason}); stopped "
+                    f"{self.robot_name} unavailable ({reason}); stopped "
                     "publishing pose updates and disabled new RMF task intake"
                 )
                 self._last_pose_warning = time.monotonic()
@@ -303,12 +317,22 @@ class RobotNav2Bridge(Node):
         if self._test_faults_enabled:
             self._test_force_stale_tf = bool(message.data)
 
+    def _on_test_force_nav2_unavailable(self, message: Bool) -> None:
+        if self._test_faults_enabled:
+            self._test_force_nav2_unavailable = bool(message.data)
+
+    def _nav2_action_server_ready(self) -> bool:
+        return (
+            not self._test_force_nav2_unavailable
+            and self._action_client.server_is_ready()
+        )
+
     def _log_commission_error(self, action: str, error: Exception) -> None:
         now = time.monotonic()
         if now - self._last_commission_error <= 10.0:
             return
         self.get_logger().fatal(
-            f"Could not {action} {self.robot_name} in RMF after a TF freshness "
+            f"Could not {action} {self.robot_name} in RMF after a health "
             f"change; task-intake state may not match telemetry: {error}"
         )
         self._last_commission_error = now
@@ -322,7 +346,10 @@ class RobotNav2Bridge(Node):
             )
             execution.finished()
             return
-        if not self._action_client.server_is_ready():
+        if not self._nav2_action_server_ready():
+            self._mark_robot_unavailable(
+                "Nav2 NavigateToPose action server is unavailable"
+            )
             self.get_logger().error("Nav2 NavigateToPose server is not ready")
             execution.finished()
             return

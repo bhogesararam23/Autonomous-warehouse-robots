@@ -30,6 +30,10 @@ case "${HUSKY_RMF_FLEET_FAULT:-none}" in
     smoke_fault_args=(--fault-injection stale-tf)
     export HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS=1
     ;;
+  nav2-unavailable)
+    smoke_fault_args=(--fault-injection nav2-unavailable)
+    export HUSKY_RMF_FLEET_ENABLE_TEST_FAULTS=1
+    ;;
   *)
     echo "Unsupported HUSKY_RMF_FLEET_FAULT: ${HUSKY_RMF_FLEET_FAULT}" >&2
     exit 2
@@ -251,6 +255,8 @@ if [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == stale-status ]]; then
   echo "PASS: injected stale FleetState was detected before task dispatch."
 elif [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == stale-tf ]]; then
   echo "PASS: stale TF disabled RMF task intake and recovery restored the gate."
+elif [[ "${HUSKY_RMF_FLEET_FAULT:-none}" == nav2-unavailable ]]; then
+  echo "PASS: unavailable Nav2 readiness disabled RMF task intake and recovery restored the gate."
 else
   echo "PASS: Open-RMF dispatched both simulated A300s through the shared schedule."
 fi

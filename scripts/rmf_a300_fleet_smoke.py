@@ -201,10 +201,17 @@ class FleetSmokeNode(Node):
                 transient_qos,
             )
         self.test_fault_publishers: dict[str, Any] = {}
+        self.test_nav2_fault_publishers: dict[str, Any] = {}
         if test_fault_injection:
             self.test_fault_publishers = {
                 robot: self.create_publisher(
                     Bool, f"/{robot}/test_force_stale_tf", 10
+                )
+                for robot in ROBOTS
+            }
+            self.test_nav2_fault_publishers = {
+                robot: self.create_publisher(
+                    Bool, f"/{robot}/test_force_nav2_unavailable", 10
                 )
                 for robot in ROBOTS
             }
@@ -397,6 +404,29 @@ class FleetSmokeNode(Node):
         publisher.publish(message)
         self.get_logger().info(
             f"Set test-only stale-TF injection for {robot} to {stale}"
+        )
+
+    def set_test_force_nav2_unavailable(
+        self, robot: str, unavailable: bool
+    ) -> None:
+        if robot not in ROBOTS:
+            raise FleetSmokeError(f"Unknown robot for Nav2-readiness fault: {robot}")
+        publisher = self.test_nav2_fault_publishers.get(robot)
+        if publisher is None:
+            raise FleetSmokeError(
+                "The test-only Nav2-readiness publisher was not enabled for this run"
+            )
+        topic = f"/{robot}/test_force_nav2_unavailable"
+        self.spin_until(
+            f"the adapter's test-only Nav2-readiness subscriber on {topic}",
+            lambda: self.count_subscribers(topic) > 0,
+            10.0,
+        )
+        message = Bool()
+        message.data = unavailable
+        publisher.publish(message)
+        self.get_logger().info(
+            f"Set test-only Nav2-unavailable injection for {robot} to {unavailable}"
         )
 
     def verify_contact_publishers(self, timeout: float) -> None:
@@ -738,6 +768,129 @@ class FleetSmokeNode(Node):
             },
         }
 
+    def run_nav2_unavailable_gate_regression(
+        self, timeout: float
+    ) -> dict[str, Any]:
+        unavailable_robot = ROBOTS[0]
+        available_robot = ROBOTS[1]
+        self.spin_until(
+            "both RMF task-intake gates to report available before injection",
+            lambda: all(
+                self.task_intake_available.get(robot) is True for robot in ROBOTS
+            ),
+            20.0,
+        )
+        self.set_test_force_nav2_unavailable(unavailable_robot, True)
+        self.spin_until(
+            f"RMF to disable task intake when Nav2 readiness fails for {unavailable_robot}",
+            lambda: self.task_intake_available.get(unavailable_robot) is False,
+            10.0,
+        )
+        if self.task_intake_available.get(available_robot) is not True:
+            raise FleetSmokeError(
+                f"Nav2-readiness injection unexpectedly disabled {available_robot} too"
+            )
+
+        request_ids = self.dispatch_goal_tasks(
+            goals=("goal_east",),
+            expected_robots={"goal_east": available_robot},
+        )
+        request_id = request_ids["goal_east"]
+        assignment = self.dispatch_state_for_request(request_id)
+        if (
+            assignment is None
+            or not assignment["is_assigned"]
+            or assignment["expected_robot_name"] != available_robot
+        ):
+            raise FleetSmokeError(
+                f"RMF did not keep the unavailable robot out of the assignment: {assignment}"
+            )
+
+        self.set_test_force_nav2_unavailable(unavailable_robot, False)
+        recovery_requested_at = time.monotonic()
+        self.spin_until(
+            f"RMF to restore task intake after Nav2 readiness recovers for {unavailable_robot}",
+            lambda: self.task_intake_available.get(unavailable_robot) is True,
+            15.0,
+        )
+        self.spin_until(
+            f"fresh FleetState to resume for recovered {unavailable_robot}",
+            lambda: self.fleet_state_wall_times.get(unavailable_robot, 0.0)
+            >= recovery_requested_at
+            and unavailable_robot not in self.stale_fleet_statuses(),
+            15.0,
+        )
+
+        def dispatched_goal_completed() -> bool:
+            current_assignment = self.dispatch_state_for_request(request_id)
+            state = self.fleet_states.get(available_robot)
+            if (
+                current_assignment is None
+                or current_assignment["status"] != DispatchState.STATUS_DISPATCHED
+                or not current_assignment["is_assigned"]
+                or current_assignment["expected_robot_name"] != available_robot
+                or state is None
+            ):
+                return False
+            goal_x, goal_y = GOAL_POSES["goal_east"]
+            xy_error = math.hypot(
+                float(state.location.x) - goal_x,
+                float(state.location.y) - goal_y,
+            )
+            yaw_error = _angle_error(
+                float(state.location.yaw), GOAL_YAWS[available_robot]
+            )
+            return (
+                not str(state.task_id).strip()
+                and int(state.mode.mode) == 0
+                and xy_error <= GOAL_XY_TOLERANCE_M
+                and yaw_error <= GOAL_YAW_TOLERANCE_RAD
+            )
+
+        self.spin_until(
+            f"the Nav2-readiness test goal to complete on {available_robot}",
+            dispatched_goal_completed,
+            timeout,
+            require_fresh_status=True,
+        )
+        for _ in range(10):
+            rclpy.spin_once(self, timeout_sec=0.1)
+        if self.contact_hits:
+            raise FleetSmokeError(
+                "Non-floor Gazebo contact observed during the Nav2-readiness test: "
+                + json.dumps(self.contact_hits[:6])
+            )
+
+        final_state = self.fleet_states[available_robot]
+        return {
+            "status": "passed",
+            "simulation": "Gazebo Harmonic headless; Clearpath Husky A300 warehouse world",
+            "fault_injection": {
+                "scenario": "nav2-action-readiness-task-intake",
+                "injection_boundary": "test-only Bool topic overrides the adapter readiness decision while the real Nav2 action server and DDS remain available",
+                "robot": unavailable_robot,
+                "task_intake_disabled_observed": True,
+                "other_robot_remained_available": True,
+                "goal": "goal_east",
+                "dispatch_task_request_id": request_id,
+                "assigned_robot": assignment["expected_robot_name"],
+                "recovery_restored_task_intake": self.task_intake_available[
+                    unavailable_robot
+                ]
+                is True,
+                "recovery_resumed_fleet_state": unavailable_robot
+                not in self.stale_fleet_statuses(),
+                "completed_robot_pose_rmf": [
+                    float(final_state.location.x),
+                    float(final_state.location.y),
+                    float(final_state.location.yaw),
+                ],
+                "non_floor_contacts": self.contact_hits,
+                "result": "The A300 with unavailable Nav2 readiness was excluded from new RMF work; the healthy A300 completed the dispatched goal, and intake plus FleetState updates resumed after readiness recovered",
+                "limitation": "This exercises the adapter readiness and recovery path with an opt-in test injection; it does not stop the Nav2 process, simulate process restart or DDS/network loss, or constitute a safety test.",
+            },
+        }
+
     def snapshot(self, request_ids: dict[str, str], start_poses: dict[str, list[float]]) -> dict[str, Any]:
         goals = {}
         for goal in GOAL_NAMES:
@@ -893,7 +1046,7 @@ def main() -> int:
     parser.add_argument("--status-fault-timeout", type=float, default=35.0)
     parser.add_argument(
         "--fault-injection",
-        choices=("none", "stale-status", "stale-tf"),
+        choices=("none", "stale-status", "stale-tf", "nav2-unavailable"),
         default="none",
     )
     parser.add_argument("--result-file", type=Path, required=True)
@@ -919,7 +1072,7 @@ def main() -> int:
     node = FleetSmokeNode(
         args.contact_count,
         args.status_stale_after,
-        test_fault_injection=args.fault_injection == "stale-tf",
+        test_fault_injection=args.fault_injection in ("stale-tf", "nav2-unavailable"),
     )
     try:
         node.spin_until("non-zero Gazebo clock", lambda: node.get_clock().now().nanoseconds > 0, 60.0)
@@ -1010,6 +1163,24 @@ def main() -> int:
             print(json.dumps(fault_result, indent=2))
             print(
                 f"PASS: stale TF excluded the robot from RMF task intake and recovery restored it. "
+                f"Evidence: {args.result_file}"
+            )
+            return 0
+        if args.fault_injection == "nav2-unavailable":
+            node.check_initial_map_routes(start_poses)
+            if node.contact_hits:
+                raise FleetSmokeError(
+                    "Non-floor contact observed before Nav2-readiness injection: "
+                    + json.dumps(node.contact_hits[:4])
+                )
+            fault_result = node.run_nav2_unavailable_gate_regression(args.timeout)
+            args.result_file.parent.mkdir(parents=True, exist_ok=True)
+            args.result_file.write_text(
+                json.dumps(fault_result, indent=2) + "\n", encoding="utf-8"
+            )
+            print(json.dumps(fault_result, indent=2))
+            print(
+                "PASS: Nav2 unavailability disabled task intake and recovery restored it. "
                 f"Evidence: {args.result_file}"
             )
             return 0

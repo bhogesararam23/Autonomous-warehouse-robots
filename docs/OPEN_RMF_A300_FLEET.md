@@ -20,11 +20,11 @@ The smoke client sends two fleet-level `dispatch_task_request` jobs to `goal_eas
 
 ## Telemetry freshness
 
-Each bridge checks the `map → base_link` transform timestamp on its 0.2-second update loop. A transform more than 1.0 second old, future-dated, unavailable, or no longer advancing is treated as stale; the timer uses a steady clock so a paused Gazebo/ROS clock does not make an unchanged transform appear fresh. While stale, the bridge stops publishing pose updates to RMF and temporarily disables that robot's direct and dispatched task intake. Once fresh transforms resume, it updates RMF with the current pose and restores the task-intake policy that was in effect before the fault. Tests cover timestamp age, paused-clock behavior, time resets, and reversible policy changes.
+Each bridge checks the `map → base_link` transform timestamp on its 0.2-second update loop. A transform more than 1.0 second old, future-dated, unavailable, or no longer advancing is treated as stale; the timer uses a steady clock so a paused Gazebo/ROS clock does not make an unchanged transform appear fresh. The bridge also checks that Nav2's `NavigateToPose` action server remains ready. After registration, stale transforms or an unavailable action server stop pose updates to RMF and temporarily disable that robot's direct and dispatched task intake. Once both the transform and action channel recover, it updates RMF with the current pose and restores the task-intake policy that was in effect before the fault. Unit tests cover transform timestamp age, paused-clock behavior, time resets, and reversible policy changes.
 
 Each bridge publishes a transient-local Boolean on `/<robot>/rmf_task_intake_available` so a late-joining observer can see the current gate state. This reports software task-intake availability only; it is not a safety signal, emergency stop, or proof that a robot has stopped.
 
-This is an availability guard, not a safety stop: it does not cancel an already-running `NavigateToPose` action or prove that the robot stopped. A delayed fault may remain undetected for up to the freshness threshold plus one bridge tick, and RMF command/commission changes are software-level behavior only. The simulation and this guard are not safety-rated and must not be connected to a physical robot.
+This is an availability guard, not a safety stop: changing RMF task intake does not itself cancel an already-running `NavigateToPose` action or prove that the robot stopped. A lost Nav2 process may independently terminate or disrupt that action. A stale transform may remain undetected for up to the freshness threshold plus one bridge tick, and RMF command/commission changes are software-level behavior only. The simulation and this guard are not safety-rated and must not be connected to a physical robot.
 
 ## Goal accuracy and completion criteria
 
@@ -65,6 +65,8 @@ The runner creates disposable A300 profiles and a contact-instrumented warehouse
 
 The adapter-level freshness fault can be tested locally with `HUSKY_RMF_FLEET_FAULT=stale-tf ./scripts/test_husky_rmf_fleet.sh`. Only this explicit regression mode enables the test-only `/<robot>/test_force_stale_tf` Bool topic. It verifies the stale robot's task-intake gate turns off, the other A300 remains available and completes a goal on its known-free route, and the original intake policy and FleetState updates return after recovery. The injected bridge state does not interrupt DDS TF transport.
 
+The Nav2-readiness gate can be tested with `HUSKY_RMF_FLEET_FAULT=nav2-unavailable ./scripts/test_husky_rmf_fleet.sh`. That opt-in mode enables a test-only `/<robot>/test_force_nav2_unavailable` Bool topic, verifies the robot is excluded from new RMF work while the healthy A300 completes a known-free goal, then checks that intake and FleetState updates resume. It overrides the adapter's readiness decision while the real action server and DDS remain available; it does not stop/restart Nav2 or simulate an action-server process or network failure.
+
 The same two-robot regression can be selected in the [manual live-simulation GitHub Actions workflow](LIVE_SIMULATION_CI.md). It runs on demand rather than on every push and uploads the fleet result JSON, logs, and hosted-runner diagnostics for review.
 
 ## Manual use
@@ -101,4 +103,4 @@ ros2 topic echo /a300_00000/rmf_task_intake_available
 
 ## Limits
 
-This is an engineering simulation, not a safety-certified fleet deployment. The 1.35 m graph-layout threshold, footprint, and speed values are simulation checks/approximations, not safety ratings; the battery model is not connected to live battery telemetry, and the adapter currently supports two A300s on one flat map with Nav2 `NavigateToPose`. The TF freshness guard only blocks new task intake; it does not cancel an in-flight action or validate real-world human interaction, radio/network failure behavior, lifts, charging, emergency stops, or physical hardware. Keep physical robots out of this workflow.
+This is an engineering simulation, not a safety-certified fleet deployment. The 1.35 m graph-layout threshold, footprint, and speed values are simulation checks/approximations, not safety ratings; the battery model is not connected to live battery telemetry, and the adapter currently supports two A300s on one flat map with Nav2 `NavigateToPose`. The telemetry/action-readiness guard only blocks new task intake; it does not cancel an in-flight action or validate real-world human interaction, radio/network failure behavior, lifts, charging, emergency stops, or physical hardware. Keep physical robots out of this workflow.

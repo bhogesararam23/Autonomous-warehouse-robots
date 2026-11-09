@@ -84,11 +84,12 @@ class TaskAcceptancePolicy:
 
 
 class RMFRobotAvailabilityGate:
-    """Temporarily block new RMF tasks while a robot's pose is stale.
+    """Temporarily block new RMF tasks while required robot health is missing.
 
     The gate preserves the robot's last observed intake policy, changes only the
-    dispatched/direct task acceptance flags, and restores that policy on fresh
-    telemetry. It does not cancel or stop an already-running robot action.
+    dispatched/direct task acceptance flags, and restores that policy after
+    telemetry and action-server readiness recover. It does not cancel or stop an
+    already-running robot action.
     """
 
     def __init__(self, easy_update_handle: object) -> None:

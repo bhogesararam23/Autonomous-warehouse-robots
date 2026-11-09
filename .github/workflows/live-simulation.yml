@@ -175,6 +175,21 @@ jobs:
           mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
           ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/stale-tf-workflow.log"
 
+      - name: Run unavailable-Nav2 Open-RMF task-intake fault injection
+        id: nav2_unavailable
+        if: ${{ success() && inputs.suite == 'fault-injection' }}
+        continue-on-error: true
+        timeout-minutes: 45
+        shell: bash
+        env:
+          HUSKY_RMF_FLEET_FAULT: nav2-unavailable
+          HUSKY_RMF_FLEET_RUN_ROOT: ${{ runner.temp }}/live-simulation-artifacts/nav2-unavailable
+          ROS_LOG_DIR: ${{ runner.temp }}/live-simulation-artifacts/nav2-unavailable/ros-log
+        run: |
+          set -euo pipefail
+          mkdir -p "$HUSKY_RMF_FLEET_RUN_ROOT" "$ROS_LOG_DIR"
+          ./scripts/test_husky_rmf_fleet.sh 2>&1 | tee "$RUNNER_TEMP/live-simulation-artifacts/nav2-unavailable-workflow.log"
+
       - name: Upload simulation logs, JSON results, and runner diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -196,6 +211,7 @@ jobs:
           BLOCKED_AISLE_OUTCOME: ${{ steps.blocked_aisle.outcome }}
           STALE_STATUS_OUTCOME: ${{ steps.stale_status.outcome }}
           STALE_TF_OUTCOME: ${{ steps.stale_tf.outcome }}
+          NAV2_UNAVAILABLE_OUTCOME: ${{ steps.nav2_unavailable.outcome }}
         run: |
           set -euo pipefail
           artifact_root="$RUNNER_TEMP/live-simulation-artifacts"
@@ -222,6 +238,7 @@ jobs:
               echo "| Nav2 blocked-aisle detour fault | $BLOCKED_AISLE_OUTCOME |"
               echo "| RMF stale-status detection fault | $STALE_STATUS_OUTCOME |"
               echo "| RMF stale-TF task-intake and recovery fault | $STALE_TF_OUTCOME |"
+              echo "| RMF unavailable-Nav2 task-intake and recovery fault | $NAV2_UNAVAILABLE_OUTCOME |"
             fi
             echo
             echo "Runner resource and graphics details, simulation logs, and any generated result JSON are attached as the workflow artifact. A failed or timed-out run is not a pass; use the logs and runner diagnostics to distinguish a simulation assertion from hosted-runner resource or graphics limitations. This remains a simulation regression, not a physical-robot safety test."
@@ -256,6 +273,10 @@ jobs:
           fi
           if [[ "$REQUESTED_SUITE" == fault-injection && "$STALE_TF_OUTCOME" != success ]]; then
             echo "The stale-TF Open-RMF task-intake fault injection did not pass (outcome: $STALE_TF_OUTCOME)." >&2
+            exit 1
+          fi
+          if [[ "$REQUESTED_SUITE" == fault-injection && "$NAV2_UNAVAILABLE_OUTCOME" != success ]]; then
+            echo "The unavailable-Nav2 Open-RMF task-intake fault injection did not pass (outcome: $NAV2_UNAVAILABLE_OUTCOME)." >&2
             exit 1
           fi
           echo "All requested live simulation regressions passed."
