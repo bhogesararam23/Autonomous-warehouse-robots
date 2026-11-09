@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test:ts": "tsx test_simulation.ts && tsx test_scenario_contract.ts",
+    "test:ts": "tsx test_simulation.ts && tsx test_scenario_contract.ts && tsx test_planner_episodes.ts",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

@@ -1,0 +1,71 @@
+{
+  "seedSemantics": "Unsigned 32-bit xorshift32; seed zero remaps to 0x6d2b79f5; candidate cells are row-major.",
+  "cases": [
+    {
+      "id": "zero-seed-standard",
+      "seed": 0,
+      "scenarioId": "standard",
+      "expected": {
+        "start": { "x": 3, "y": 3 },
+        "goal": { "x": 19, "y": 12 },
+        "status": "success",
+        "pathLength": 35
+      }
+    },
+    {
+      "id": "seed-one-standard",
+      "seed": 1,
+      "scenarioId": "standard",
+      "expected": {
+        "start": { "x": 21, "y": 8 },
+        "goal": { "x": 3, "y": 13 },
+        "status": "success",
+        "pathLength": 33
+      }
+    },
+    {
+      "id": "seed-42-peak",
+      "seed": 42,
+      "scenarioId": "peak-traffic",
+      "expected": {
+        "start": { "x": 20, "y": 6 },
+        "goal": { "x": 21, "y": 1 },
+        "status": "success",
+        "pathLength": 6
+      }
+    },
+    {
+      "id": "seed-2026-standard",
+      "seed": 2026,
+      "scenarioId": "standard",
+      "expected": {
+        "start": { "x": 18, "y": 12 },
+        "goal": { "x": 9, "y": 13 },
+        "status": "success",
+        "pathLength": 27
+      }
+    },
+    {
+      "id": "seed-17-peak",
+      "seed": 17,
+      "scenarioId": "peak-traffic",
+      "expected": {
+        "start": { "x": 18, "y": 13 },
+        "goal": { "x": 2, "y": 10 },
+        "status": "success",
+        "pathLength": 31
+      }
+    },
+    {
+      "id": "maximum-seed-peak",
+      "seed": 4294967295,
+      "scenarioId": "peak-traffic",
+      "expected": {
+        "start": { "x": 17, "y": 4 },
+        "goal": { "x": 14, "y": 13 },
+        "status": "success",
+        "pathLength": 12
+      }
+    }
+  ]
+}

@@ -55,6 +55,8 @@ Both planner APIs support custom grid dimensions and a larger planning horizon. 
 
 For callers that need explicit failure handling, Python `plan_warehouse` and TypeScript `planWarehouse` return a discriminated result: `status: "success"` with the path and expanded-node count, or `status: "failure"` with a stable `code` (`invalid-input` or `no-safe-path`) and message. The low-level `astar` functions remain available and raise typed exceptions for compatibility.
 
+The Python and TypeScript episode APIs use the same unsigned 32-bit xorshift seed rules (zero maps to `0x6d2b79f5`) and row-major safe-cell selection. Each replayable event stream records the seed and endpoints, every robot position by time step, and the final structured outcome. `python3 scripts/test_episode_replay.py` runs shared seeds through both implementations, repeats generation, and verifies replay reproduces the same event sequence.
+
 The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor. After installing the UI dependencies, run `python3 scripts/test_planner_parity.py` from the repository root to compare both planners against shared deterministic fixtures, verify safe optimal path lengths and matching structured failure codes, and check that repeat runs are stable.
 
 ## Tests and CI checks
@@ -76,7 +78,7 @@ npm run lint
 npm run build
 ```
 
-CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, cross-language planner parity fixtures, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally. The real headless Gazebo regressions are available in a separate [manual-only GitHub Actions workflow](docs/LIVE_SIMULATION_CI.md) and are not part of push/pull-request CI.
+CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, cross-language planner parity and seeded episode replay fixtures, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally. The real headless Gazebo regressions are available in a separate [manual-only GitHub Actions workflow](docs/LIVE_SIMULATION_CI.md) and are not part of push/pull-request CI.
 
 ## ROS 2 / Gazebo simulation
 

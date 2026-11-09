@@ -104,6 +104,9 @@ jobs:
       - name: Run cross-language planner parity fixtures
         run: python3 scripts/test_planner_parity.py
 
+      - name: Run seeded episode replay parity
+        run: python3 scripts/test_episode_replay.py
+
       - name: Run ESLint
         working-directory: ui
         run: npm run lint
