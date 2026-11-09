@@ -53,7 +53,9 @@ The planner uses time-aware A*: each search state includes both a grid location 
 
 Both planner APIs support custom grid dimensions and a larger planning horizon. The current UI and Python CLI launch with the standard 24×14 map and the default 120-step planning limit; the CLI does not provide command-line flags for custom dimensions or horizon. The Python `astar` function accepts `grid_width`, `grid_height`, and `max_planning_time`; the TypeScript `astar` function accepts the corresponding `gridWidth`, `gridHeight`, and `maxPlanningTime` options.
 
-The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor. After installing the UI dependencies, run `python3 scripts/test_planner_parity.py` from the repository root to compare both planners against shared deterministic fixtures, verify safe optimal path lengths and failure classes, and check that repeat runs are stable.
+For callers that need explicit failure handling, Python `plan_warehouse` and TypeScript `planWarehouse` return a discriminated result: `status: "success"` with the path and expanded-node count, or `status: "failure"` with a stable `code` (`invalid-input` or `no-safe-path`) and message. The low-level `astar` functions remain available and raise typed exceptions for compatibility.
+
+The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor. After installing the UI dependencies, run `python3 scripts/test_planner_parity.py` from the repository root to compare both planners against shared deterministic fixtures, verify safe optimal path lengths and matching structured failure codes, and check that repeat runs are stable.
 
 ## Tests and CI checks
 

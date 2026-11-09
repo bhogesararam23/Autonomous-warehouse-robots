@@ -7,7 +7,7 @@ import {
   DEFAULT_SCENARIO_ID,
   SCENARIOS,
   buildObstacles,
-  astar,
+  planWarehouse,
   positionAt,
   type ScenarioId,
 } from './simulation';
@@ -24,18 +24,10 @@ export default function App() {
   const scenario = SCENARIOS.find((candidate) => candidate.id === selectedScenarioId) ?? SCENARIOS[0];
 
   const plan = useMemo(() => {
-    try {
-      const res = astar(START, GOAL, obstacles, scenario.movingObstacles);
-      return { ...res, error: null };
-    } catch (err: unknown) {
-      return {
-        path: [],
-        expandedNodes: 0,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
+    return planWarehouse(START, GOAL, obstacles, scenario.movingObstacles);
   }, [obstacles, scenario]);
-  const { path, expandedNodes, error } = plan;
+  const path = useMemo(() => (plan.status === 'success' ? plan.path : []), [plan]);
+  const expandedNodes = plan.status === 'success' ? plan.expandedNodes : 0;
   const lastStep = Math.max(path.length - 1, 0);
 
   // Simulation playback
@@ -283,8 +275,8 @@ export default function App() {
 
           <div className="stats">
             <h2>Simulation Stats</h2>
-            {error ? (
-              <div className="error">{error}</div>
+            {plan.status === 'failure' ? (
+              <div className="error">[{plan.code}] {plan.message}</div>
             ) : (
               <>
                 <div className="stat-row">

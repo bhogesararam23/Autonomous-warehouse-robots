@@ -4,8 +4,9 @@ import argparse
 import heapq
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from scenario_contract import validate_scenario_catalog
 
@@ -15,6 +16,35 @@ from scenario_contract import validate_scenario_catalog
 # y moves up/down across rows.
 Point = tuple[int, int]
 State = tuple[Point, int]
+
+
+class InvalidPlannerInputError(ValueError):
+    """Raised when planner inputs cannot describe a valid warehouse problem."""
+
+    code = "invalid-input"
+
+
+class NoSafePathError(RuntimeError):
+    """Raised when no collision-free path can be found within the horizon."""
+
+    code = "no-safe-path"
+
+
+@dataclass(frozen=True)
+class PlannerSuccess:
+    path: list[State]
+    expanded_nodes: int
+    status: Literal["success"] = field(default="success", init=False)
+
+
+@dataclass(frozen=True)
+class PlannerFailure:
+    code: Literal["invalid-input", "no-safe-path"]
+    message: str
+    status: Literal["failure"] = field(default="failure", init=False)
+
+
+PlannerOutcome = PlannerSuccess | PlannerFailure
 
 
 @dataclass(frozen=True)
@@ -234,9 +264,9 @@ def astar(
         or type(grid_height) is not int
         or grid_height <= 0
     ):
-        raise ValueError("Grid dimensions must be positive integers.")
+        raise InvalidPlannerInputError("Grid dimensions must be positive integers.")
     if type(max_planning_time) is not int or max_planning_time < 0:
-        raise ValueError("The planning time limit must be a non-negative integer.")
+        raise InvalidPlannerInputError("The planning time limit must be a non-negative integer.")
 
     def inside_grid(point: Point) -> bool:
         x, y = point
@@ -249,20 +279,20 @@ def astar(
 
     for obstacle in moving_obstacles:
         if not obstacle.route:
-            raise ValueError(
+            raise InvalidPlannerInputError(
                 f"Moving obstacle '{obstacle.name}' route must not be empty."
             )
         if any(not inside_grid(point) for point in obstacle.route):
-            raise ValueError(
+            raise InvalidPlannerInputError(
                 f"Moving obstacle '{obstacle.name}' route points must be integer coordinates inside the grid."
             )
 
     if not inside_grid(start) or not inside_grid(goal):
-        raise ValueError("Start and goal must be inside the grid.")
+        raise InvalidPlannerInputError("Start and goal must be inside the grid.")
     if start in obstacles or goal in obstacles:
-        raise ValueError("Start and goal must not be blocked by static obstacles.")
+        raise InvalidPlannerInputError("Start and goal must not be blocked by static obstacles.")
     if any(start == obstacle.position_at(0) for obstacle in moving_obstacles):
-        raise RuntimeError("No safe path found before the planning time limit.")
+        raise NoSafePathError("No safe path found before the planning time limit.")
 
     start_state = (start, 0)
     open_set: list[tuple[int, int, int, State]] = []
@@ -319,7 +349,34 @@ def astar(
                     (estimated_total_cost, next_time, tie_breaker, neighbor_state),
                 )
 
-    raise RuntimeError("No safe path found before the planning time limit.")
+    raise NoSafePathError("No safe path found before the planning time limit.")
+
+
+def plan_warehouse(
+    start: Point,
+    goal: Point,
+    obstacles: set[Point],
+    moving_obstacles: list[MovingObstacle],
+    *,
+    grid_width: int = GRID_WIDTH,
+    grid_height: int = GRID_HEIGHT,
+    max_planning_time: int = MAX_PLANNING_TIME,
+) -> PlannerOutcome:
+    """Plan a route while converting expected planner errors into outcomes."""
+    try:
+        path, expanded_nodes = astar(
+            start,
+            goal,
+            obstacles,
+            moving_obstacles,
+            grid_width=grid_width,
+            grid_height=grid_height,
+            max_planning_time=max_planning_time,
+        )
+    except (InvalidPlannerInputError, NoSafePathError) as error:
+        return PlannerFailure(code=error.code, message=str(error))
+
+    return PlannerSuccess(path=path, expanded_nodes=expanded_nodes)
 
 
 def count_wait_steps(path: list[State]) -> int:
@@ -573,19 +630,9 @@ def main(argv: list[str] | None = None) -> int:
     obstacles = build_obstacles()
     failures = 0
 
-    if START in obstacles:
-        raise ValueError("The start position is inside a shelf.")
-
-    if GOAL in obstacles:
-        raise ValueError("The goal position is inside a shelf.")
-
-    if START in moving_obstacle_positions(moving_obstacles, 0):
-        raise ValueError("The start position is occupied by a moving obstacle.")
-
     start_time = time.perf_counter()
-    try:
-        path, expanded_nodes = astar(START, GOAL, obstacles, moving_obstacles)
-    except RuntimeError as error:
+    outcome = plan_warehouse(START, GOAL, obstacles, moving_obstacles)
+    if isinstance(outcome, PlannerFailure):
         failures += 1
         elapsed_seconds = time.perf_counter() - start_time
 
@@ -599,8 +646,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Time taken: {elapsed_seconds * 1000:.3f} ms")
         print("Collisions: 0")
         print(f"Failures: {failures}")
-        print(f"Failure reason: {error}")
+        print(f"Failure code: {outcome.code}")
+        print(f"Failure reason: {outcome.message}")
         return 1
+    path = outcome.path
+    expanded_nodes = outcome.expanded_nodes
     elapsed_seconds = time.perf_counter() - start_time
     collisions, simulation_failures = simulate_path(
         path, moving_obstacles, obstacles=obstacles

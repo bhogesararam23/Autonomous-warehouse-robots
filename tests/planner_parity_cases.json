@@ -59,7 +59,7 @@
         { "x": 1, "y": 1 }
       ],
       "movingObstacles": [],
-      "expected": { "status": "no-safe-path" }
+      "expected": { "status": "failure", "code": "no-safe-path" }
     },
     {
       "id": "periodically-unsafe-goal",
@@ -78,7 +78,18 @@
           ]
         }
       ],
-      "expected": { "status": "no-safe-path" }
+      "expected": { "status": "failure", "code": "no-safe-path" }
+    },
+    {
+      "id": "invalid-out-of-grid-start",
+      "gridWidth": 3,
+      "gridHeight": 3,
+      "maxPlanningTime": 6,
+      "start": { "x": -1, "y": 0 },
+      "goal": { "x": 2, "y": 2 },
+      "staticObstacles": [],
+      "movingObstacles": [],
+      "expected": { "status": "failure", "code": "invalid-input" }
     }
   ]
 }

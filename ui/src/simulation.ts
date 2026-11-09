@@ -225,6 +225,32 @@ export interface PlannerOptions {
   maxPlanningTime?: number;
 }
 
+export class InvalidPlannerInputError extends RangeError {
+  readonly code = 'invalid-input' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPlannerInputError';
+  }
+}
+
+export class NoSafePathError extends Error {
+  readonly code = 'no-safe-path' as const;
+
+  constructor(message = 'No safe path found') {
+    super(message);
+    this.name = 'NoSafePathError';
+  }
+}
+
+export type WarehousePlan =
+  | { status: 'success'; path: State[]; expandedNodes: number }
+  | {
+      status: 'failure';
+      code: InvalidPlannerInputError['code'] | NoSafePathError['code'];
+      message: string;
+    };
+
 export function astar(
   start: Point,
   goal: Point,
@@ -241,10 +267,12 @@ export function astar(
     !Number.isInteger(gridHeight) ||
     gridHeight <= 0
   ) {
-    throw new RangeError('Grid dimensions must be positive integers');
+    throw new InvalidPlannerInputError('Grid dimensions must be positive integers');
   }
   if (!Number.isInteger(maxPlanningTime) || maxPlanningTime < 0) {
-    throw new RangeError('The planning time limit must be a non-negative integer');
+    throw new InvalidPlannerInputError(
+      'The planning time limit must be a non-negative integer',
+    );
   }
 
   const insideGrid = (point: Point) =>
@@ -256,25 +284,31 @@ export function astar(
     point.y < gridHeight;
   for (const obstacle of movingObstacles) {
     if (obstacle.route.length === 0) {
-      throw new RangeError(`Moving obstacle '${obstacle.name}' route must not be empty`);
+      throw new InvalidPlannerInputError(
+        `Moving obstacle '${obstacle.name}' route must not be empty`,
+      );
     }
     if (!obstacle.route.every(insideGrid)) {
-      throw new RangeError(
+      throw new InvalidPlannerInputError(
         `Moving obstacle '${obstacle.name}' route points must be integer coordinates inside the grid`,
       );
     }
   }
+  if (!insideGrid(start) || !insideGrid(goal)) {
+    throw new InvalidPlannerInputError('Start and goal must be inside the grid.');
+  }
+  if (obstacles.has(`${start.x},${start.y}`) || obstacles.has(`${goal.x},${goal.y}`)) {
+    throw new InvalidPlannerInputError(
+      'Start and goal must not be blocked by static obstacles.',
+    );
+  }
   if (
-    !insideGrid(start) ||
-    !insideGrid(goal) ||
-    obstacles.has(`${start.x},${start.y}`) ||
-    obstacles.has(`${goal.x},${goal.y}`) ||
     movingObstacles.some((obstacle) => {
       const position = positionAt(obstacle.route, 0);
       return position.x === start.x && position.y === start.y;
     })
   ) {
-    throw new Error('No safe path found');
+    throw new NoSafePathError();
   }
 
   const startState: State = { point: start, timeStep: 0 };
@@ -336,5 +370,25 @@ export function astar(
     }
   }
 
-  throw new Error("No safe path found");
+  throw new NoSafePathError();
+}
+
+export function planWarehouse(
+  start: Point,
+  goal: Point,
+  obstacles: Set<string>,
+  movingObstacles: MovingObstacle[],
+  options: PlannerOptions = {},
+): WarehousePlan {
+  try {
+    return {
+      status: 'success',
+      ...astar(start, goal, obstacles, movingObstacles, options),
+    };
+  } catch (error: unknown) {
+    if (error instanceof InvalidPlannerInputError || error instanceof NoSafePathError) {
+      return { status: 'failure', code: error.code, message: error.message };
+    }
+    throw error;
+  }
 }

@@ -8,9 +8,11 @@ import {
   GOAL,
   GRID_HEIGHT,
   GRID_WIDTH,
+  InvalidPlannerInputError,
   isSafeAfterArrival,
   MinPriorityQueue,
   MOVING_OBSTACLES,
+  planWarehouse,
   positionAt,
   SCENARIOS,
   START,
@@ -212,6 +214,46 @@ assertValidPath(
 );
 console.log('A* path length matches the independent BFS baseline.');
 
+const wrapperSuccess = planWarehouse(
+  baselineStart,
+  baselineGoal,
+  baselineObstacles,
+  [],
+  { gridWidth: baselineGridWidth, gridHeight: baselineGridHeight, maxPlanningTime: 20 },
+);
+assert.equal(wrapperSuccess.status, 'success');
+if (wrapperSuccess.status === 'success') {
+  assert.equal(wrapperSuccess.path.length - 1, shortestBaselineLength);
+  assert.ok(wrapperSuccess.expandedNodes > 0);
+}
+
+const wrapperInvalid = planWarehouse(
+  { x: -1, y: 0 },
+  baselineGoal,
+  baselineObstacles,
+  [],
+  { gridWidth: baselineGridWidth, gridHeight: baselineGridHeight },
+);
+assert.deepEqual(wrapperInvalid, {
+  status: 'failure',
+  code: 'invalid-input',
+  message: 'Start and goal must be inside the grid.',
+});
+
+const wrapperNoPath = planWarehouse(
+  { x: 0, y: 0 },
+  { x: 2, y: 0 },
+  new Set(['1,0']),
+  [],
+  { gridWidth: 3, gridHeight: 1, maxPlanningTime: 3 },
+);
+assert.deepEqual(wrapperNoPath, {
+  status: 'failure',
+  code: 'no-safe-path',
+  message: 'No safe path found',
+});
+console.log('planWarehouse success and typed failure results passed.');
+
 const largeGridWidth = 64;
 const largeGridHeight = 40;
 const largeStart = { x: 1, y: 1 };
@@ -342,7 +384,7 @@ const invalidBoundaryRoutes = [
 for (const { label, start, goal } of invalidBoundaryRoutes) {
   assert.throws(
     () => astar(start, goal, shelves, []),
-    { message: 'No safe path found' },
+    InvalidPlannerInputError,
     `planner should reject an ${label}`,
   );
 }
@@ -418,12 +460,12 @@ for (const { label, options } of invalidPlannerInputs) {
 }
 assert.throws(
   () => astar({ x: 0.5, y: 0 }, { x: 0.5, y: 0 }, new Set(), []),
-  { message: 'No safe path found' },
+  InvalidPlannerInputError,
   'planner should reject non-integer point coordinates',
 );
 assert.throws(
   () => astar({ x: 0, y: 0 }, { x: 0.5, y: 0 }, new Set(), []),
-  { message: 'No safe path found' },
+  InvalidPlannerInputError,
   'planner should reject non-integer goal coordinates',
 );
 const invalidMovingObstacleRoutes: { label: string; route: Point[] }[] = [

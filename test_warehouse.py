@@ -12,7 +12,11 @@ from warehouse_astar_sim import (
     DEFAULT_SCENARIO_ID,
     GRID_HEIGHT,
     GRID_WIDTH,
+    InvalidPlannerInputError,
     MOVING_OBSTACLES,
+    NoSafePathError,
+    PlannerFailure,
+    PlannerSuccess,
     SCENARIO_CONFIG_PATH,
     SCENARIOS,
     MovingObstacle,
@@ -23,6 +27,7 @@ from warehouse_astar_sim import (
     get_joint_period,
     get_scenario,
     main,
+    plan_warehouse,
     parse_args,
     simulate_path,
 )
@@ -102,12 +107,16 @@ class TestWarehousePlanner(unittest.TestCase):
         self.assertIn("SVG visualization:", output.getvalue())
 
     def test_cli_planning_failure_returns_nonzero(self):
-        with patch("warehouse_astar_sim.astar", side_effect=RuntimeError("no path")):
+        with patch(
+            "warehouse_astar_sim.astar",
+            side_effect=NoSafePathError("no path"),
+        ):
             with redirect_stdout(StringIO()) as output:
                 exit_code = main(["--no-svg"])
 
         self.assertEqual(exit_code, 1)
         self.assertIn("Failure reason: no path", output.getvalue())
+        self.assertIn("Failure code: no-safe-path", output.getvalue())
 
     def test_cli_replay_failure_returns_nonzero(self):
         invalid_path = [((1, 1), 0), ((23, 13), 1)]
@@ -116,6 +125,31 @@ class TestWarehousePlanner(unittest.TestCase):
                 exit_code = main(["--no-svg"])
 
         self.assertEqual(exit_code, 1)
+
+    def test_plan_warehouse_returns_success_outcome(self):
+        outcome = plan_warehouse(
+            (0, 0), (0, 0), set(), [], grid_width=1, grid_height=1, max_planning_time=0
+        )
+
+        self.assertIsInstance(outcome, PlannerSuccess)
+        self.assertEqual(outcome.status, "success")
+        self.assertEqual(outcome.path, [((0, 0), 0)])
+        self.assertEqual(outcome.expanded_nodes, 1)
+
+    def test_plan_warehouse_returns_typed_failure_outcomes(self):
+        invalid_input = plan_warehouse(
+            (-1, 0), (0, 0), set(), [], grid_width=1, grid_height=1
+        )
+        no_safe_path = plan_warehouse(
+            (0, 0), (2, 0), {(1, 0)}, [], grid_width=3, grid_height=1
+        )
+
+        self.assertIsInstance(invalid_input, PlannerFailure)
+        self.assertEqual(invalid_input.status, "failure")
+        self.assertEqual(invalid_input.code, "invalid-input")
+        self.assertIsInstance(no_safe_path, PlannerFailure)
+        self.assertEqual(no_safe_path.status, "failure")
+        self.assertEqual(no_safe_path.code, "no-safe-path")
 
     def test_collision_demos_run_and_report_expected_collision(self):
         repo_root = Path(__file__).resolve().parent

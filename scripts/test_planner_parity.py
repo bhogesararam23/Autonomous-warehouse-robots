@@ -16,7 +16,7 @@ TS_RUNNER = ROOT / "ui" / "run_planner_parity.ts"
 TSX = ROOT / "ui" / "node_modules" / ".bin" / "tsx"
 sys.path.insert(0, str(ROOT))
 
-from warehouse_astar_sim import MovingObstacle, astar  # noqa: E402
+from warehouse_astar_sim import MovingObstacle, plan_warehouse  # noqa: E402
 
 
 def run_python_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -32,32 +32,32 @@ def run_python_cases(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
             for mover in case["movingObstacles"]
         ]
-        try:
-            path, expanded_nodes = astar(
-                (case["start"]["x"], case["start"]["y"]),
-                (case["goal"]["x"], case["goal"]["y"]),
-                static_obstacles,
-                moving_obstacles,
-                grid_width=case["gridWidth"],
-                grid_height=case["gridHeight"],
-                max_planning_time=case["maxPlanningTime"],
-            )
+        outcome = plan_warehouse(
+            (case["start"]["x"], case["start"]["y"]),
+            (case["goal"]["x"], case["goal"]["y"]),
+            static_obstacles,
+            moving_obstacles,
+            grid_width=case["gridWidth"],
+            grid_height=case["gridHeight"],
+            max_planning_time=case["maxPlanningTime"],
+        )
+        if outcome.status == "failure":
             results.append(
-                {
-                    "id": case["id"],
-                    "status": "success",
-                    "pathLength": len(path) - 1,
-                    "expandedNodes": expanded_nodes,
-                    "path": [
-                        {"x": point[0], "y": point[1], "timeStep": time_step}
-                        for point, time_step in path
-                    ],
-                }
+                {"id": case["id"], "status": outcome.status, "code": outcome.code}
             )
-        except RuntimeError as error:
-            if "No safe path found" not in str(error):
-                raise
-            results.append({"id": case["id"], "status": "no-safe-path"})
+            continue
+        results.append(
+            {
+                "id": case["id"],
+                "status": outcome.status,
+                "pathLength": len(outcome.path) - 1,
+                "expandedNodes": outcome.expanded_nodes,
+                "path": [
+                    {"x": point[0], "y": point[1], "timeStep": time_step}
+                    for point, time_step in outcome.path
+                ],
+            }
+        )
     return results
 
 
@@ -171,7 +171,19 @@ def main() -> int:
                 f"Unexpected result for {case_id}: {python_result['status']} "
                 f"(expected {expected['status']})"
             )
-        if expected["status"] == "success":
+        if expected["status"] == "failure":
+            if python_result.get("code") != ts_result.get("code"):
+                raise AssertionError(
+                    f"Planner failure-code mismatch for {case_id}: "
+                    f"Python={python_result.get('code')}, TypeScript={ts_result.get('code')}"
+                )
+            if python_result.get("code") != expected["code"]:
+                raise AssertionError(
+                    f"Unexpected failure code for {case_id}: {python_result.get('code')} "
+                    f"(expected {expected['code']})"
+                )
+            print(f"PASS {case_id}: both planners returned failure code {expected['code']}")
+        elif expected["status"] == "success":
             expected_length = expected["pathLength"]
             for engine, result in (("Python", python_result), ("TypeScript", ts_result)):
                 if result["pathLength"] != expected_length:
@@ -185,7 +197,7 @@ def main() -> int:
                 "and repeated runs were deterministic"
             )
         else:
-            print(f"PASS {case_id}: both planners returned {expected['status']}")
+            raise AssertionError(f"Unknown expected result status: {expected['status']}")
 
     print(f"PASS: {len(cases)} shared differential fixtures")
     return 0

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { astar, type MovingObstacle, type Point } from './src/simulation';
+import { planWarehouse, type MovingObstacle, type Point } from './src/simulation';
 
 interface PlannerFixture {
   id: string;
@@ -10,7 +10,7 @@ interface PlannerFixture {
   goal: Point;
   staticObstacles: Point[];
   movingObstacles: MovingObstacle[];
-  expected: { status: string; pathLength?: number };
+  expected: { status: string; code?: string; pathLength?: number };
 }
 
 interface FixtureFile {
@@ -24,35 +24,31 @@ const output = fixtureFile.cases.map((fixture) => {
   const staticObstacles = new Set(
     fixture.staticObstacles.map((point) => `${point.x},${point.y}`),
   );
-  try {
-    const result = astar(
-      fixture.start,
-      fixture.goal,
-      staticObstacles,
-      fixture.movingObstacles,
-      {
-        gridWidth: fixture.gridWidth,
-        gridHeight: fixture.gridHeight,
-        maxPlanningTime: fixture.maxPlanningTime,
-      },
-    );
-    return {
-      id: fixture.id,
-      status: 'success',
-      pathLength: result.path.length - 1,
-      expandedNodes: result.expandedNodes,
-      path: result.path.map((state) => ({
-        x: state.point.x,
-        y: state.point.y,
-        timeStep: state.timeStep,
-      })),
-    };
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('No safe path')) {
-      return { id: fixture.id, status: 'no-safe-path' };
-    }
-    throw error;
+  const result = planWarehouse(
+    fixture.start,
+    fixture.goal,
+    staticObstacles,
+    fixture.movingObstacles,
+    {
+      gridWidth: fixture.gridWidth,
+      gridHeight: fixture.gridHeight,
+      maxPlanningTime: fixture.maxPlanningTime,
+    },
+  );
+  if (result.status === 'failure') {
+    return { id: fixture.id, status: result.status, code: result.code };
   }
+  return {
+    id: fixture.id,
+    status: result.status,
+    pathLength: result.path.length - 1,
+    expandedNodes: result.expandedNodes,
+    path: result.path.map((state) => ({
+      x: state.point.x,
+      y: state.point.y,
+      timeStep: state.timeStep,
+    })),
+  };
 });
 
 process.stdout.write(`${JSON.stringify(output)}\n`);
