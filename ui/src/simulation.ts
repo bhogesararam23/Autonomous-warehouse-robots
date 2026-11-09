@@ -1,21 +1,28 @@
-import scenarioConfig from '../../scenarios.json';
+import rawScenarioConfig from '../../scenarios.json';
+import { validateScenarioCatalog, type ScenarioCatalog } from './scenarioContract';
+
+const scenarioConfig = rawScenarioConfig as ScenarioCatalog;
+validateScenarioCatalog(scenarioConfig);
+const warehouse = scenarioConfig.warehouse;
 
 export type Point = { x: number; y: number };
 export type State = { point: Point; timeStep: number };
 
-export const GRID_WIDTH = 24;
-export const GRID_HEIGHT = 14;
+export const GRID_WIDTH = warehouse.width;
+export const GRID_HEIGHT = warehouse.height;
 
-export const START: Point = { x: 1, y: 1 };
-export const GOAL: Point = { x: 22, y: 12 };
+export const START: Point = warehouse.start;
+export const GOAL: Point = warehouse.goal;
 
-export const SHELVES = [
-  { name: 'A', x: 5, y: 0, w: 2, h: 9 },
-  { name: 'B', x: 10, y: 5, w: 2, h: 9 },
-  { name: 'C', x: 15, y: 0, w: 2, h: 9 },
-];
+export const SHELVES = warehouse.shelves.map((shelf) => ({
+  name: shelf.name,
+  x: shelf.x,
+  y: shelf.y,
+  w: shelf.width,
+  h: shelf.height,
+}));
 
-export const MAX_PLANNING_TIME = 120;
+export const MAX_PLANNING_TIME = warehouse.maxPlanningTime;
 
 export interface MovingObstacle {
   name: string;

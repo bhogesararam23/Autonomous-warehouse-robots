@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Warehouse planner scenario catalog",
+  "description": "Versioned, discrete-grid input shared by Python and TypeScript. This structural schema is paired with runtime validators for cross-field geometry and period constraints.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "coordinateSystem",
+    "warehouse",
+    "defaultScenarioId",
+    "scenarios"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "coordinateSystem": {
+      "type": "object",
+      "required": ["unit", "origin", "xAxisDirection", "yAxisDirection", "timeStepSemantics"],
+      "additionalProperties": false,
+      "properties": {
+        "unit": { "const": "cell" },
+        "origin": { "const": "top-left" },
+        "xAxisDirection": { "const": "right" },
+        "yAxisDirection": { "const": "down" },
+        "timeStepSemantics": { "const": "one-move-or-wait" }
+      }
+    },
+    "warehouse": {
+      "type": "object",
+      "required": ["width", "height", "start", "goal", "maxPlanningTime", "shelves"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "start": { "$ref": "#/$defs/point" },
+        "goal": { "$ref": "#/$defs/point" },
+        "maxPlanningTime": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "shelves": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": { "$ref": "#/$defs/shelf" }
+        }
+      }
+    },
+    "defaultScenarioId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])",
+      "maxLength": 64
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "y": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 }
+      }
+    },
+    "shelf": {
+      "type": "object",
+      "required": ["name", "x", "y", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "\\S", "maxLength": 256 },
+        "x": { "type": "integer", "minimum": 0, "maximum": 511 },
+        "y": { "type": "integer", "minimum": 0, "maximum": 511 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 512 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 512 }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "name", "description", "movingObstacles"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*(?![\\s\\S])", "maxLength": 64 },
+        "name": { "type": "string", "pattern": "\\S", "maxLength": 256 },
+        "description": { "type": "string", "pattern": "\\S", "maxLength": 1024 },
+        "movingObstacles": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/movingObstacle" }
+        }
+      }
+    },
+    "movingObstacle": {
+      "type": "object",
+      "required": ["name", "route"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "\\S", "maxLength": 256 },
+        "route": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/point" }
+        }
+      }
+    }
+  }
+}

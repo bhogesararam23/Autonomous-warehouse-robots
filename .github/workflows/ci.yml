@@ -101,6 +101,9 @@ jobs:
         working-directory: ui
         run: npm run test:ts
 
+      - name: Run cross-language planner parity fixtures
+        run: python3 scripts/test_planner_parity.py
+
       - name: Run ESLint
         working-directory: ui
         run: npm run lint

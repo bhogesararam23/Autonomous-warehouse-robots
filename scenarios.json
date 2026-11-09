@@ -1,4 +1,24 @@
 {
+  "schemaVersion": 1,
+  "coordinateSystem": {
+    "unit": "cell",
+    "origin": "top-left",
+    "xAxisDirection": "right",
+    "yAxisDirection": "down",
+    "timeStepSemantics": "one-move-or-wait"
+  },
+  "warehouse": {
+    "width": 24,
+    "height": 14,
+    "start": { "x": 1, "y": 1 },
+    "goal": { "x": 22, "y": 12 },
+    "maxPlanningTime": 120,
+    "shelves": [
+      { "name": "A", "x": 5, "y": 0, "width": 2, "height": 9 },
+      { "name": "B", "x": 10, "y": 5, "width": 2, "height": 9 },
+      { "name": "C", "x": 15, "y": 0, "width": 2, "height": 9 }
+    ]
+  },
   "defaultScenarioId": "standard",
   "scenarios": [
     {

@@ -38,14 +38,14 @@ The CLI prints a planning summary and ASCII map. By default, a successful plan a
 
 ## Scenarios and map
 
-Both the UI and Python implementation read their scenario definitions from the shared root-level [`scenarios.json`](scenarios.json):
+Both planners read the versioned [`scenarios.json`](scenarios.json) catalog. Its [`scenarios.schema.json`](scenarios.schema.json) defines field shapes, coordinate/time semantics, and structural limits; the TypeScript tests validate the checked-in catalog against it. Matching Python and TypeScript runtime validators additionally enforce cross-field invariants before planning, including in-grid endpoints/routes, non-overlapping shelves and movers, adjacent mover steps, a bounded map/horizon, and a bounded joint route period. Invalid catalogs fail before either planner runs.
 
 | Scenario | CLI ID | Moving obstacles |
 | --- | --- | --- |
 | **Standard warehouse** (default) | `standard` | A forklift and another mobile robot following repeating routes. |
 | **Peak cross-aisle traffic** | `peak-traffic` | The standard obstacles plus a pallet cart patrolling the central cross-aisle. |
 
-The default warehouse is 24 columns by 14 rows. Coordinates use `(x, y)`, with `x` increasing left to right and `y` increasing top to bottom. The robot starts at `(1, 1)` and plans to reach `(22, 12)` around three fixed shelf blocks.
+The default warehouse is 24 columns by 14 rows. Coordinates use `(x, y)`, with `x` increasing left to right and `y` increasing top to bottom. The robot starts at `(1, 1)` and plans to reach `(22, 12)` around three fixed shelf blocks. These values now come from the shared catalog rather than duplicated planner constants.
 
 ## How planning works
 
@@ -53,7 +53,7 @@ The planner uses time-aware A*: each search state includes both a grid location 
 
 Both planner APIs support custom grid dimensions and a larger planning horizon. The current UI and Python CLI launch with the standard 24×14 map and the default 120-step planning limit; the CLI does not provide command-line flags for custom dimensions or horizon. The Python `astar` function accepts `grid_width`, `grid_height`, and `max_planning_time`; the TypeScript `astar` function accepts the corresponding `gridWidth`, `gridHeight`, and `maxPlanningTime` options.
 
-The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor.
+The Python terminal map uses `S` for the start, `G` for the goal, `#` for shelves, `M` for a moving obstacle at time zero, `*` for the planned path, and `.` for open floor. After installing the UI dependencies, run `python3 scripts/test_planner_parity.py` from the repository root to compare both planners against shared deterministic fixtures, verify safe optimal path lengths and failure classes, and check that repeat runs are stable.
 
 ## Tests and CI checks
 
@@ -74,7 +74,7 @@ npm run lint
 npm run build
 ```
 
-CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally. The real headless Gazebo regressions are available in a separate [manual-only GitHub Actions workflow](docs/LIVE_SIMULATION_CI.md) and are not part of push/pull-request CI.
+CI runs Python tests and smoke-tests both scenarios on Python 3.10 and 3.12. It runs the TypeScript tests, cross-language planner parity fixtures, ESLint, and production build on Node.js 22, and has a separate ROS 2 Jazzy job that builds both workspace packages, runs their tests, and checks the Open-RMF assets. The UI regression tests also exercise a larger custom grid and horizon, collision avoidance, keyboard-shortcut focus guards, and stable priority-queue ordering. From a ROS-enabled environment, run `./scripts/test_ros2_workspace.sh` for the same ROS checks locally. The real headless Gazebo regressions are available in a separate [manual-only GitHub Actions workflow](docs/LIVE_SIMULATION_CI.md) and are not part of push/pull-request CI.
 
 ## ROS 2 / Gazebo simulation
 

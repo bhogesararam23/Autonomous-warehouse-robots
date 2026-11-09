@@ -7,29 +7,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from scenario_contract import validate_scenario_catalog
+
 
 # A grid point is written as (x, y).
 # x moves left/right across columns.
 # y moves up/down across rows.
 Point = tuple[int, int]
 State = tuple[Point, int]
-
-
-GRID_WIDTH = 24
-GRID_HEIGHT = 14
-
-START: Point = (1, 1)
-GOAL: Point = (22, 12)
-
-# Each shelf is a rectangle: (name, x, y, width, height).
-# The coordinate (x, y) is the shelf's top-left grid cell.
-SHELVES = [
-    ("A", 5, 0, 2, 9),
-    ("B", 10, 5, 2, 9),
-    ("C", 15, 0, 2, 9),
-]
-
-MAX_PLANNING_TIME = 120
 
 
 @dataclass(frozen=True)
@@ -54,6 +39,18 @@ class WarehouseScenario:
 SCENARIO_CONFIG_PATH = Path(__file__).with_name("scenarios.json")
 with SCENARIO_CONFIG_PATH.open(encoding="utf-8") as scenario_file:
     SCENARIO_CONFIG = json.load(scenario_file)
+validate_scenario_catalog(SCENARIO_CONFIG)
+
+_WAREHOUSE = SCENARIO_CONFIG["warehouse"]
+GRID_WIDTH = _WAREHOUSE["width"]
+GRID_HEIGHT = _WAREHOUSE["height"]
+START: Point = (_WAREHOUSE["start"]["x"], _WAREHOUSE["start"]["y"])
+GOAL: Point = (_WAREHOUSE["goal"]["x"], _WAREHOUSE["goal"]["y"])
+SHELVES = [
+    (shelf["name"], shelf["x"], shelf["y"], shelf["width"], shelf["height"])
+    for shelf in _WAREHOUSE["shelves"]
+]
+MAX_PLANNING_TIME = _WAREHOUSE["maxPlanningTime"]
 
 DEFAULT_SCENARIO_ID = SCENARIO_CONFIG["defaultScenarioId"]
 SCENARIOS: dict[str, WarehouseScenario] = {

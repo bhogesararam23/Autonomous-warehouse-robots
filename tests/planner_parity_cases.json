@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "id": "open-grid-tie-break",
+      "gridWidth": 4,
+      "gridHeight": 3,
+      "maxPlanningTime": 5,
+      "start": { "x": 0, "y": 0 },
+      "goal": { "x": 3, "y": 2 },
+      "staticObstacles": [],
+      "movingObstacles": [],
+      "expected": { "status": "success", "pathLength": 5 }
+    },
+    {
+      "id": "static-wall-detour",
+      "gridWidth": 6,
+      "gridHeight": 5,
+      "maxPlanningTime": 20,
+      "start": { "x": 0, "y": 2 },
+      "goal": { "x": 5, "y": 2 },
+      "staticObstacles": [
+        { "x": 2, "y": 0 },
+        { "x": 2, "y": 1 },
+        { "x": 2, "y": 2 },
+        { "x": 2, "y": 3 }
+      ],
+      "movingObstacles": [],
+      "expected": { "status": "success", "pathLength": 9 }
+    },
+    {
+      "id": "moving-obstacle-forces-wait",
+      "gridWidth": 3,
+      "gridHeight": 2,
+      "maxPlanningTime": 6,
+      "start": { "x": 0, "y": 0 },
+      "goal": { "x": 2, "y": 0 },
+      "staticObstacles": [],
+      "movingObstacles": [
+        {
+          "name": "crossing-patrol",
+          "route": [
+            { "x": 0, "y": 1 },
+            { "x": 1, "y": 0 },
+            { "x": 1, "y": 1 }
+          ]
+        }
+      ],
+      "expected": { "status": "success", "pathLength": 3 }
+    },
+    {
+      "id": "unreachable-static-wall",
+      "gridWidth": 3,
+      "gridHeight": 2,
+      "maxPlanningTime": 6,
+      "start": { "x": 0, "y": 0 },
+      "goal": { "x": 2, "y": 0 },
+      "staticObstacles": [
+        { "x": 1, "y": 0 },
+        { "x": 1, "y": 1 }
+      ],
+      "movingObstacles": [],
+      "expected": { "status": "no-safe-path" }
+    },
+    {
+      "id": "periodically-unsafe-goal",
+      "gridWidth": 2,
+      "gridHeight": 2,
+      "maxPlanningTime": 0,
+      "start": { "x": 0, "y": 0 },
+      "goal": { "x": 0, "y": 0 },
+      "staticObstacles": [],
+      "movingObstacles": [
+        {
+          "name": "returning-patrol",
+          "route": [
+            { "x": 1, "y": 1 },
+            { "x": 0, "y": 0 }
+          ]
+        }
+      ],
+      "expected": { "status": "no-safe-path" }
+    }
+  ]
+}
